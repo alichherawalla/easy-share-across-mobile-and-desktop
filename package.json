@@ -1,0 +1,29 @@
+{
+  "name": "easy-android-to-mac",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-platform file/text sharing between Android and macOS",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:shared": "npm run build -w @easyshare/shared",
+    "build:desktop": "npm run build -w @easyshare/desktop",
+    "dev:desktop": "npm run dev -w @easyshare/desktop",
+    "dev:mobile": "npm run start -w @easyshare/mobile",
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "7zip-bin": "^5.2.0",
+    "electron": "33.2.0",
+    "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "postcss-nested": "5.0.6"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

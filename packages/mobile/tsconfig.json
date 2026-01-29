@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "jsx": "react-native",
+    "noEmit": true,
+    "baseUrl": ".",
+    "moduleResolution": "node",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["../shared/src/*"],
+      "nativewind/*": ["../../node_modules/nativewind/*"]
+    }
+  },
+  "include": ["src/**/*", "index.js", "App.tsx", "nativewind-env.d.ts"],
+  "exclude": ["node_modules"]
+}

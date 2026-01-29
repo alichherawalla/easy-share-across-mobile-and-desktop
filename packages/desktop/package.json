@@ -1,0 +1,54 @@
+{
+  "name": "@easyshare/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-builder",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@easyshare/shared": "*",
+    "@tabler/icons-react": "^2.47.0",
+    "bonjour-service": "^1.2.1",
+    "electron-store": "^8.1.0",
+    "framer-motion": "^11.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "7zip-bin": "^5.2.0",
+    "autoprefixer": "^10.4.16",
+    "electron": "33.2.0",
+    "electron-builder": "^26.4.0",
+    "electron-vite": "^2.0.0",
+    "postcss": "^8.4.32",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.4.21"
+  },
+  "build": {
+    "appId": "com.easyshare.desktop",
+    "productName": "EasyShare",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "files": [
+      "dist/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    }
+  }
+}
