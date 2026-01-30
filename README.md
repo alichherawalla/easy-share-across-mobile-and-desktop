@@ -6,8 +6,41 @@ EasyShare is a cross-platform application that enables seamless file and text sh
 
 ---
 
+## Screenshots
+
+### Android App
+
+<p align="center">
+  <img src="screenshots/android-devices.jpg" alt="Android Devices" width="300"/>
+  &nbsp;&nbsp;&nbsp;
+  <img src="screenshots/android-connected.jpg" alt="Android Connected" width="300"/>
+</p>
+
+<p align="center">
+  <em>Left: Discover and connect to paired devices &nbsp;|&nbsp; Right: Send files and text while connected</em>
+</p>
+
+### macOS App
+
+<p align="center">
+  <img src="screenshots/mac-devices.png" alt="macOS Devices" width="400"/>
+  &nbsp;&nbsp;
+  <img src="screenshots/mac-connected.png" alt="macOS Connected" width="400"/>
+</p>
+
+<p align="center">
+  <img src="screenshots/mac-file-received.png" alt="macOS File Received" width="500"/>
+</p>
+
+<p align="center">
+  <em>Device pairing, real-time file transfers, and transfer history</em>
+</p>
+
+---
+
 ## Table of Contents
 
+- [Screenshots](#screenshots)
 - [Why EasyShare?](#why-easyshare)
 - [Features](#features)
 - [Privacy & Security](#privacy--security)
