@@ -57,6 +57,12 @@ export class ConnectionManager {
   private receivingChunks: Map<number, Uint8Array> = new Map();
   private receivingFileInfo: { fileName: string; totalChunks: number; checksum: string } | null = null;
 
+  // Keepalive state
+  private keepaliveInterval: NodeJS.Timeout | null = null;
+  private lastPongReceived: number = Date.now();
+  private readonly KEEPALIVE_INTERVAL = 5000; // Send ping every 5 seconds
+  private readonly KEEPALIVE_TIMEOUT = 15000; // Disconnect if no pong for 15 seconds
+
   // Callbacks
   private onConnectionStateChangeCallback?: (state: ConnectionState) => void;
   private onTransferProgressCallback?: (progress: TransferProgress) => void;
@@ -114,16 +120,33 @@ export class ConnectionManager {
     return new Promise((resolve) => {
       this.socket = new net.Socket();
 
+      this.updateConnectionState({
+        status: 'connecting',
+        device,
+        statusMessage: `Opening TCP connection to ${device.name}...`,
+        pairingStep: 'connecting',
+      });
+
       this.socket.on('connect', () => {
         this.connectedDevice = device;
-        this.updateConnectionState({ status: 'connected', device });
+        this.updateConnectionState({
+          status: 'connected',
+          device,
+          statusMessage: `Connected to ${device.name}`,
+          pairingStep: 'idle',
+        });
         this.setupSocketHandlers();
         resolve(true);
       });
 
       this.socket.on('error', (err) => {
         console.error('Connection error:', err);
-        this.updateConnectionState({ status: 'disconnected', error: err.message });
+        this.updateConnectionState({
+          status: 'disconnected',
+          error: err.message,
+          statusMessage: `Connection failed: ${err.message}`,
+          pairingStep: 'failed',
+        });
         resolve(false);
       });
 
@@ -132,6 +155,7 @@ export class ConnectionManager {
   }
 
   disconnect(): void {
+    this.stopKeepalive();
     if (this.socket) {
       this.socket.destroy();
       this.socket = null;
@@ -140,6 +164,36 @@ export class ConnectionManager {
     this.currentPairingState = null;
     this.pendingPassphrase = null;
     this.updateConnectionState({ status: 'disconnected' });
+  }
+
+  private startKeepalive(): void {
+    this.stopKeepalive();
+    this.lastPongReceived = Date.now();
+
+    this.keepaliveInterval = setInterval(() => {
+      if (!this.socket) {
+        this.stopKeepalive();
+        return;
+      }
+
+      // Check if we've received a pong recently
+      const timeSinceLastPong = Date.now() - this.lastPongReceived;
+      if (timeSinceLastPong > this.KEEPALIVE_TIMEOUT) {
+        console.log('Keepalive timeout - disconnecting');
+        this.disconnect();
+        return;
+      }
+
+      // Send ping
+      this.sendMessage(createPingMessage());
+    }, this.KEEPALIVE_INTERVAL);
+  }
+
+  private stopKeepalive(): void {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+    }
   }
 
   async startPairing(deviceId: string, passphrase: string): Promise<boolean> {
@@ -152,11 +206,23 @@ export class ConnectionManager {
     this.currentPairingState.passphrase = passphrase;
     this.currentPairingState.remoteDevice = this.connectedDevice!;
 
-    this.updateConnectionState({ status: 'pairing' });
+    this.updateConnectionState({
+      status: 'pairing',
+      device: this.connectedDevice || undefined,
+      statusMessage: 'Sending pairing request...',
+      pairingStep: 'sending_request',
+    });
 
     // Send pair request
     const request = createPairRequest(this.localDevice);
     this.sendMessage(request);
+
+    this.updateConnectionState({
+      status: 'pairing',
+      device: this.connectedDevice || undefined,
+      statusMessage: 'Waiting for challenge from remote device...',
+      pairingStep: 'waiting_for_challenge',
+    });
 
     return true;
   }
@@ -259,6 +325,9 @@ export class ConnectionManager {
   private setupSocketHandlers(): void {
     if (!this.socket) return;
 
+    // Enable TCP keepalive at the socket level
+    this.socket.setKeepAlive(true, 10000);
+
     this.socket.on('data', (data) => {
       this.messageBuffer.append(new Uint8Array(data));
       this.processMessages();
@@ -272,6 +341,9 @@ export class ConnectionManager {
       console.error('Socket error:', err);
       this.disconnect();
     });
+
+    // Start application-level keepalive
+    this.startKeepalive();
   }
 
   private processMessages(): void {
@@ -285,6 +357,11 @@ export class ConnectionManager {
     switch (message.type) {
       case 'ping':
         this.sendMessage(createPongMessage(message.id));
+        break;
+
+      case 'pong':
+        // Update last pong time for keepalive
+        this.lastPongReceived = Date.now();
         break;
 
       case 'pair_request':
@@ -333,12 +410,43 @@ export class ConnectionManager {
       const remoteDevice = (message as any).payload?.deviceInfo as DeviceInfo | undefined;
       if (remoteDevice) {
         this.connectedDevice = remoteDevice;
-        this.updateConnectionState({ status: 'pairing', device: remoteDevice });
+        this.updateConnectionState({
+          status: 'pairing',
+          device: remoteDevice,
+          statusMessage: `Pairing request from ${remoteDevice.name}. Enter passphrase to continue.`,
+          pairingStep: 'waiting_for_passphrase',
+        });
         if (this.onPairingRequestCallback) {
           this.onPairingRequestCallback(remoteDevice);
         }
       }
       return;
+    }
+
+    // Log and update status based on message type
+    console.log(`Processing pairing message: ${message.type}`);
+
+    if (message.type === 'pair_request') {
+      this.updateConnectionState({
+        status: 'pairing',
+        device: this.connectedDevice || undefined,
+        statusMessage: 'Deriving encryption key from passphrase...',
+        pairingStep: 'deriving_key',
+      });
+    } else if (message.type === 'pair_challenge') {
+      this.updateConnectionState({
+        status: 'pairing',
+        device: this.connectedDevice || undefined,
+        statusMessage: 'Received challenge. Computing response...',
+        pairingStep: 'responding_to_challenge',
+      });
+    } else if (message.type === 'pair_response') {
+      this.updateConnectionState({
+        status: 'pairing',
+        device: this.connectedDevice || undefined,
+        statusMessage: 'Verifying passphrase match...',
+        pairingStep: 'verifying_response',
+      });
     }
 
     const { newState, response } = handlePairingMessage(
@@ -350,6 +458,28 @@ export class ConnectionManager {
     this.currentPairingState = newState;
 
     if (response) {
+      if (response.type === 'pair_challenge') {
+        this.updateConnectionState({
+          status: 'pairing',
+          device: this.connectedDevice || undefined,
+          statusMessage: 'Sending cryptographic challenge...',
+          pairingStep: 'sending_challenge',
+        });
+      } else if (response.type === 'pair_response') {
+        this.updateConnectionState({
+          status: 'pairing',
+          device: this.connectedDevice || undefined,
+          statusMessage: 'Sending challenge response...',
+          pairingStep: 'responding_to_challenge',
+        });
+      } else if (response.type === 'pair_confirm') {
+        this.updateConnectionState({
+          status: 'pairing',
+          device: this.connectedDevice || undefined,
+          statusMessage: 'Passphrase verified! Confirming pairing...',
+          pairingStep: 'confirming',
+        });
+      }
       this.sendMessage(response);
     }
 
@@ -359,14 +489,29 @@ export class ConnectionManager {
       if (pairedDevice) {
         this.storageService.addPairedDevice(pairedDevice);
         this.connectedDevice = newState.remoteDevice!;
-        this.updateConnectionState({ status: 'connected', device: this.connectedDevice });
+        this.updateConnectionState({
+          status: 'connected',
+          device: this.connectedDevice || undefined,
+          statusMessage: 'Pairing successful! Devices are now paired.',
+          pairingStep: 'success',
+        });
       }
     } else if (newState.status === 'failed') {
-      this.updateConnectionState({ status: 'disconnected', error: newState.error });
+      this.updateConnectionState({
+        status: 'disconnected',
+        error: newState.error,
+        statusMessage: `Pairing failed: ${newState.error}`,
+        pairingStep: 'failed',
+      });
     } else if (newState.status === 'waiting') {
       // Need passphrase from user - update UI
       this.connectedDevice = newState.remoteDevice!;
-      this.updateConnectionState({ status: 'pairing', device: this.connectedDevice });
+      this.updateConnectionState({
+        status: 'pairing',
+        device: this.connectedDevice || undefined,
+        statusMessage: 'Waiting for passphrase...',
+        pairingStep: 'waiting_for_passphrase',
+      });
     }
   }
 

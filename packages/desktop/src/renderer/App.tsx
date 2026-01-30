@@ -153,6 +153,13 @@ export default function App() {
     await window.api.sendFile(filePath);
   }, []);
 
+  const handleSendFiles = useCallback(async (filePaths: string[]) => {
+    // Send files sequentially to avoid overwhelming the connection
+    for (const filePath of filePaths) {
+      await window.api.sendFile(filePath);
+    }
+  }, []);
+
   const handleUnpair = useCallback(async (deviceId: string) => {
     const devices = await window.api.unpairDevice(deviceId);
     setPairedDevices(devices);
@@ -215,6 +222,7 @@ export default function App() {
                 onDisconnect={handleDisconnect}
                 onSendText={handleSendText}
                 onSendFile={handleSendFile}
+                onSendFiles={handleSendFiles}
                 currentProgress={currentProgress}
                 transfers={transfers}
               />
@@ -249,6 +257,8 @@ export default function App() {
               <SettingsView
                 settings={settings}
                 onUpdate={handleUpdateSettings}
+                pairedDevices={pairedDevices}
+                onUnpair={handleUnpair}
               />
             </motion.div>
           )}
@@ -266,6 +276,7 @@ export default function App() {
         }}
         onPair={handlePair}
         connectionState={connectionState}
+        isIncoming={isIncomingPairing}
       />
     </div>
   );

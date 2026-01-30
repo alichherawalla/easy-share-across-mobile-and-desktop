@@ -94,35 +94,42 @@ async function initializeServices(): Promise<void> {
 
   connectionManager = new ConnectionManager(storageService);
 
+  // Helper to safely send to renderer
+  const safeSend = (channel: string, data: any) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, data);
+    }
+  };
+
   // Set up discovery callbacks
   discoveryService.onDeviceFound((device) => {
-    mainWindow?.webContents.send('device:found', device);
+    safeSend('device:found', device);
   });
 
   discoveryService.onDeviceLost((deviceId) => {
-    mainWindow?.webContents.send('device:lost', deviceId);
+    safeSend('device:lost', deviceId);
   });
 
   // Set up connection callbacks
   connectionManager.onConnectionStateChange((state) => {
-    mainWindow?.webContents.send('connection:state', state);
+    safeSend('connection:state', state);
   });
 
   connectionManager.onTransferProgress((progress) => {
-    mainWindow?.webContents.send('transfer:progress', progress);
+    safeSend('transfer:progress', progress);
   });
 
   connectionManager.onTransferComplete((transfer) => {
     storageService?.addTransfer(transfer);
-    mainWindow?.webContents.send('transfer:complete', transfer);
+    safeSend('transfer:complete', transfer);
   });
 
   connectionManager.onTextReceived((text, device) => {
-    mainWindow?.webContents.send('text:received', { text, device });
+    safeSend('text:received', { text, device });
   });
 
   connectionManager.onPairingRequest((device) => {
-    mainWindow?.webContents.send('pairing:request', device);
+    safeSend('pairing:request', device);
   });
 
   // Start services
@@ -178,7 +185,7 @@ function setupIpcHandlers(): void {
     return connectionManager?.sendFile(filePath);
   });
 
-  // Select file dialog
+  // Select file dialog (single file)
   ipcMain.handle('dialog:selectFile', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ['openFile'],
@@ -188,6 +195,18 @@ function setupIpcHandlers(): void {
       return null;
     }
     return result.filePaths[0];
+  });
+
+  // Select files dialog (multiple files)
+  ipcMain.handle('dialog:selectFiles', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile', 'multiSelections'],
+      title: 'Select files to send',
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths;
   });
 
   // Remove paired device

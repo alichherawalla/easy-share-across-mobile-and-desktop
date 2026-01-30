@@ -9,11 +9,13 @@ import {
   StyleSheet,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
-import type { AppSettings } from '@easyshare/shared';
+import type { AppSettings, PairedDevice } from '@easyshare/shared';
 
 interface SettingsScreenProps {
   settings: AppSettings;
   onUpdate: (updates: Partial<AppSettings>) => void;
+  pairedDevices?: PairedDevice[];
+  onUnpair?: (deviceId: string) => void;
 }
 
 const styles = StyleSheet.create({
@@ -163,9 +165,71 @@ const styles = StyleSheet.create({
   bottomPadding: {
     height: 32,
   },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: '#737373',
+    fontSize: 14,
+  },
+  emptySubtext: {
+    color: '#525252',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  deviceList: {
+    gap: 12,
+  },
+  deviceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(38, 38, 38, 0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(64, 64, 64, 0.5)',
+  },
+  deviceInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  deviceIconContainer: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(64, 64, 64, 0.5)',
+  },
+  deviceName: {
+    color: '#ffffff',
+    fontWeight: '500',
+  },
+  deviceDate: {
+    color: '#737373',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  forgetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  forgetButtonText: {
+    color: '#f87171',
+    fontSize: 14,
+  },
 });
 
-export function SettingsScreen({ settings, onUpdate }: SettingsScreenProps) {
+export function SettingsScreen({ settings, onUpdate, pairedDevices = [], onUnpair }: SettingsScreenProps) {
   const [deviceName, setDeviceName] = useState(settings.deviceName);
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -310,9 +374,57 @@ export function SettingsScreen({ settings, onUpdate }: SettingsScreenProps) {
           </View>
         </Animated.View>
 
-        {/* About section */}
+        {/* Paired Devices section */}
         <Animated.View
           entering={FadeInDown.delay(400).duration(300)}
+          style={styles.card}
+        >
+          <View style={styles.cardHeader}>
+            <View style={styles.cardIcon}>
+              <Text>🔗</Text>
+            </View>
+            <Text style={styles.cardTitle}>Paired Devices</Text>
+          </View>
+
+          {pairedDevices.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>📱</Text>
+              <Text style={styles.emptyText}>No paired devices</Text>
+              <Text style={styles.emptySubtext}>
+                Devices you pair with will appear here
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.deviceList}>
+              {pairedDevices.map((device) => (
+                <View key={device.id} style={styles.deviceItem}>
+                  <View style={styles.deviceInfo}>
+                    <View style={styles.deviceIconContainer}>
+                      <Text>{device.platform === 'android' ? '📱' : '💻'}</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.deviceName}>{device.name}</Text>
+                      <Text style={styles.deviceDate}>
+                        Paired {device.pairedAt ? new Date(device.pairedAt).toLocaleDateString() : 'Unknown'}
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => onUnpair?.(device.id)}
+                    style={styles.forgetButton}
+                  >
+                    <Text>🗑️</Text>
+                    <Text style={styles.forgetButtonText}>Forget</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+        </Animated.View>
+
+        {/* About section */}
+        <Animated.View
+          entering={FadeInDown.delay(500).duration(300)}
           style={styles.aboutCard}
         >
           <View style={styles.aboutContent}>

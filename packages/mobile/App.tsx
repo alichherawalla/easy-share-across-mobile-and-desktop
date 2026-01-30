@@ -97,42 +97,82 @@ function App(): React.JSX.Element {
   // Track if we're responding to an incoming pairing request
   const [isIncomingPairing, setIsIncomingPairing] = useState(false);
 
-  // Start server and discovery on mount
+  // Set up callbacks once on mount
   useEffect(() => {
-    if (settings) {
-      // Set local device info for pairing
-      const localDevice = {
-        id: settings.deviceId,
-        name: settings.deviceName,
-        platform: 'android' as const,
-        version: '1.0.0',
-        host: '',
-        port: 0,
-      };
-      setLocalDevice(localDevice);
+    onPairingSuccess((pairedDevice) => {
+      addPairedDevice(pairedDevice);
+      setIsIncomingPairing(false);
+    });
 
-      // Start the TCP server first, then advertise with the actual port
-      startServer().then((port) => {
-        console.log('Server started on port:', port);
-        // Update local device with actual port
-        setLocalDevice({ ...localDevice, port });
-        startDiscovery();
-        advertise({
-          ...localDevice,
-          port: port,
-        });
-      }).catch((error) => {
-        console.error('Failed to start server:', error);
-        // Still start discovery even if server fails
-        startDiscovery();
+    onTransferComplete((transfer) => {
+      console.log('App: Transfer complete callback fired', transfer.id, transfer.type);
+      addTransfer(transfer);
+    });
+
+    onTextReceived((_text, _device) => {
+      // Handle received text (could show notification)
+    });
+
+    onPairingRequest((device) => {
+      // Incoming pairing request from another device
+      console.log('Incoming pairing request from:', device.name);
+      setPairingDevice(device as DiscoveredDevice);
+      setIsIncomingPairing(true);
+      setShowPairingModal(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Start server and discovery when settings are available
+  useEffect(() => {
+    if (!settings) return;
+
+    // Set local device info for pairing
+    const localDevice = {
+      id: settings.deviceId,
+      name: settings.deviceName,
+      platform: 'android' as const,
+      version: '1.0.0',
+      host: '',
+      port: 0,
+    };
+    setLocalDevice(localDevice);
+
+    let isMounted = true;
+
+    // Start the TCP server first, then advertise with the actual port
+    console.log('Starting TCP server...');
+    startServer().then((port) => {
+      if (!isMounted) return;
+
+      console.log('Server started on port:', port);
+      // Update local device with actual port
+      const deviceWithPort = { ...localDevice, port };
+      setLocalDevice(deviceWithPort);
+      console.log('Starting discovery...');
+      startDiscovery();
+      console.log('Advertising service:', deviceWithPort);
+      advertise(deviceWithPort).then(() => {
+        console.log('Advertising started successfully');
+      }).catch((err) => {
+        console.error('Failed to advertise:', err);
       });
-    }
+    }).catch((error) => {
+      console.error('Failed to start server:', error);
+      // Still start discovery even if server fails
+      if (isMounted) {
+        startDiscovery();
+      }
+    });
 
     return () => {
+      isMounted = false;
       stopDiscovery();
       stopAdvertising();
       stopServer();
     };
+    // Only re-run when deviceId changes (which should be never after initial load)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.deviceId]);
 
   // Handle connection state changes - only switch view on status transitions
@@ -168,30 +208,6 @@ function App(): React.JSX.Element {
     }
   }, [connectionState.status, connectionState.device, pairedDevices, showPairingModal, view]);
 
-  // Set up callbacks
-  useEffect(() => {
-    onPairingSuccess((pairedDevice) => {
-      addPairedDevice(pairedDevice);
-      setIsIncomingPairing(false);
-    });
-
-    onTransferComplete((transfer) => {
-      console.log('App: Transfer complete callback fired', transfer.id, transfer.type);
-      addTransfer(transfer);
-    });
-
-    onTextReceived((text, device) => {
-      // Handle received text (could show notification)
-    });
-
-    onPairingRequest((device) => {
-      // Incoming pairing request from another device
-      console.log('Incoming pairing request from:', device.name);
-      setPairingDevice(device as DiscoveredDevice);
-      setIsIncomingPairing(true);
-      setShowPairingModal(true);
-    });
-  }, []);
 
   const handleConnect = useCallback(async (device: DiscoveredDevice) => {
     const isPaired = pairedDevices.some((d) => d.id === device.id);
@@ -232,6 +248,13 @@ function App(): React.JSX.Element {
 
   const handleSendFile = useCallback(async (filePath: string, fileName?: string) => {
     await sendFile(filePath, fileName);
+  }, [sendFile]);
+
+  const handleSendFiles = useCallback(async (files: Array<{ uri: string; name?: string }>) => {
+    // Send files sequentially to avoid overwhelming the connection
+    for (const file of files) {
+      await sendFile(file.uri, file.name);
+    }
   }, [sendFile]);
 
   const handleUnpair = useCallback(async (deviceId: string) => {
@@ -295,6 +318,7 @@ function App(): React.JSX.Element {
                 onDisconnect={handleDisconnect}
                 onSendText={handleSendText}
                 onSendFile={handleSendFile}
+                onSendFiles={handleSendFiles}
                 currentProgress={currentProgress}
                 transfers={transfers}
               />
@@ -323,6 +347,8 @@ function App(): React.JSX.Element {
               <SettingsScreen
                 settings={settings}
                 onUpdate={handleUpdateSettings}
+                pairedDevices={pairedDevices}
+                onUnpair={handleUnpair}
               />
             </Animated.View>
           )}
@@ -338,6 +364,7 @@ function App(): React.JSX.Element {
           }}
           onPair={handlePair}
           connectionState={connectionState}
+          isIncoming={isIncomingPairing}
         />
       </SafeAreaView>
     </SafeAreaProvider>

@@ -23,6 +23,7 @@ interface ConnectedViewProps {
   onDisconnect: () => void;
   onSendText: (text: string) => void;
   onSendFile: (filePath: string) => void;
+  onSendFiles?: (filePaths: string[]) => void;
   currentProgress: TransferProgress | null;
   transfers: Transfer[];
 }
@@ -32,6 +33,7 @@ export function ConnectedView({
   onDisconnect,
   onSendText,
   onSendFile,
+  onSendFiles,
   currentProgress,
   transfers,
 }: ConnectedViewProps) {
@@ -52,9 +54,18 @@ export function ConnectedView({
   };
 
   const handleSelectFile = async () => {
-    const filePath = await window.api.selectFile();
-    if (filePath) {
-      onSendFile(filePath);
+    const filePaths = await window.api.selectFiles();
+    if (filePaths && filePaths.length > 0) {
+      if (filePaths.length === 1) {
+        onSendFile(filePaths[0]);
+      } else if (onSendFiles) {
+        onSendFiles(filePaths);
+      } else {
+        // Fallback: send files one by one
+        for (const filePath of filePaths) {
+          onSendFile(filePath);
+        }
+      }
     }
   };
 
@@ -77,13 +88,26 @@ export function ConnectedView({
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      // Get the file path - in Electron we can access the path
-      const file = files[0] as File & { path?: string };
-      if (file.path) {
-        onSendFile(file.path);
+      const filePaths: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i] as File & { path?: string };
+        if (file.path) {
+          filePaths.push(file.path);
+        }
+      }
+
+      if (filePaths.length === 1) {
+        onSendFile(filePaths[0]);
+      } else if (filePaths.length > 1 && onSendFiles) {
+        onSendFiles(filePaths);
+      } else {
+        // Fallback: send files one by one
+        for (const filePath of filePaths) {
+          onSendFile(filePath);
+        }
       }
     }
-  }, [onSendFile]);
+  }, [onSendFile, onSendFiles]);
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -283,10 +307,10 @@ export function ConnectedView({
                 <p className={`transition-colors ${
                   isDragOver ? 'text-blue-400' : 'text-neutral-400 group-hover:text-neutral-300'
                 }`}>
-                  {isDragOver ? 'Drop file here' : 'Click to select a file'}
+                  {isDragOver ? 'Drop files here' : 'Click to select files'}
                 </p>
                 <p className="text-sm text-neutral-600 mt-1">
-                  or drag and drop
+                  or drag and drop (multiple files supported)
                 </p>
               </div>
             </div>

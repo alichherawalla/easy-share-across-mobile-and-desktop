@@ -47,6 +47,8 @@ const api = {
 
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:selectFile'),
 
+  selectFiles: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:selectFiles'),
+
   clearTransfers: (): Promise<Transfer[]> => ipcRenderer.invoke('transfers:clear'),
 
   showInFolder: (filePath: string): Promise<void> => ipcRenderer.invoke('file:showInFolder', filePath),

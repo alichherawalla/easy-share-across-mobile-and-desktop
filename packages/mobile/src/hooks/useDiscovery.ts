@@ -13,6 +13,7 @@ export function useDiscovery() {
   const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredDevice[]>([]);
   const zeroconfRef = useRef<Zeroconf | null>(null);
   const localDeviceRef = useRef<DeviceInfo | null>(null);
+  const isAdvertisingRef = useRef<boolean>(false);
 
   useEffect(() => {
     zeroconfRef.current = new Zeroconf();
@@ -77,7 +78,11 @@ export function useDiscovery() {
   }, []);
 
   const stopDiscovery = useCallback(() => {
-    zeroconfRef.current?.stop();
+    try {
+      zeroconfRef.current?.stop();
+    } catch (error) {
+      // Ignore errors if zeroconf wasn't scanning
+    }
   }, []);
 
   const advertise = useCallback(async (device: DeviceInfo) => {
@@ -86,6 +91,7 @@ export function useDiscovery() {
     // Use native NSD module to advertise the service
     try {
       await nsdBridge.registerService(device);
+      isAdvertisingRef.current = true;
       console.log('Advertising service:', device.name);
     } catch (error) {
       console.error('Failed to advertise service:', error);
@@ -94,8 +100,13 @@ export function useDiscovery() {
 
   const stopAdvertising = useCallback(async () => {
     localDeviceRef.current = null;
+    // Only try to unregister if we were actually advertising
+    if (!isAdvertisingRef.current) {
+      return;
+    }
     try {
       await nsdBridge.unregisterService();
+      isAdvertisingRef.current = false;
     } catch (error) {
       console.error('Failed to stop advertising:', error);
     }

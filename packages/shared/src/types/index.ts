@@ -202,10 +202,28 @@ export interface ErrorMessage extends Message {
 // Connection Types
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'pairing';
 
+export type PairingStep =
+  | 'idle'
+  | 'connecting'
+  | 'sending_request'
+  | 'waiting_for_passphrase'
+  | 'deriving_key'
+  | 'sending_challenge'
+  | 'waiting_for_challenge'
+  | 'responding_to_challenge'
+  | 'verifying_response'
+  | 'confirming'
+  | 'success'
+  | 'failed';
+
 export interface ConnectionState {
   status: ConnectionStatus;
   device?: DeviceInfo;
   error?: string;
+  /** Verbose status message for UI display */
+  statusMessage?: string;
+  /** Current step in the pairing process */
+  pairingStep?: PairingStep;
 }
 
 // Storage Types

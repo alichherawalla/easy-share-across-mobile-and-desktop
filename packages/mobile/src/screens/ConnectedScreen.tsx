@@ -26,6 +26,7 @@ interface ConnectedScreenProps {
   onDisconnect: () => void;
   onSendText: (text: string) => void;
   onSendFile: (filePath: string, fileName?: string) => void;
+  onSendFiles?: (files: Array<{ uri: string; name?: string }>) => void;
   currentProgress: TransferProgress | null;
   transfers: Transfer[];
 }
@@ -356,6 +357,7 @@ export function ConnectedScreen({
   onDisconnect,
   onSendText,
   onSendFile,
+  onSendFiles,
   currentProgress,
   transfers,
 }: ConnectedScreenProps) {
@@ -385,12 +387,29 @@ export function ConnectedScreen({
     try {
       const result = await DocumentPicker.pick({
         type: [DocumentPicker.types.allFiles],
+        allowMultiSelection: true,
       });
 
       if (result.length > 0) {
-        const file = result[0];
-        if (file.uri) {
-          onSendFile(file.uri, file.name || undefined);
+        if (result.length === 1) {
+          // Single file - use existing callback
+          const file = result[0];
+          if (file.uri) {
+            onSendFile(file.uri, file.name || undefined);
+          }
+        } else if (onSendFiles) {
+          // Multiple files - use batch callback
+          const files = result
+            .filter((file: any) => file.uri)
+            .map((file: any) => ({ uri: file.uri, name: file.name || undefined }));
+          onSendFiles(files);
+        } else {
+          // Fallback: send files one by one
+          for (const file of result) {
+            if (file.uri) {
+              onSendFile(file.uri, file.name || undefined);
+            }
+          }
         }
       }
     } catch (err: any) {
@@ -400,7 +419,7 @@ export function ConnectedScreen({
       Alert.alert('Error', 'Failed to select file');
       console.error('Document picker error:', err);
     }
-  }, [onSendFile]);
+  }, [onSendFile, onSendFiles]);
 
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -569,9 +588,9 @@ export function ConnectedScreen({
           <View style={styles.fileDropContent}>
             <Text style={styles.fileIcon}>📄</Text>
             <View style={{ alignItems: 'center' }}>
-              <Text style={styles.fileDropText}>Tap to select a file</Text>
+              <Text style={styles.fileDropText}>Tap to select files</Text>
               <Text style={styles.fileDropSubtext}>
-                Share files from your device
+                Select one or multiple files to share
               </Text>
             </View>
           </View>

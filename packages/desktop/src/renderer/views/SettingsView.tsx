@@ -5,15 +5,20 @@ import {
   IconFolder,
   IconBell,
   IconCheck,
+  IconDevices,
+  IconTrash,
+  IconDeviceMobile,
 } from '@tabler/icons-react';
-import type { AppSettings } from '@easyshare/shared';
+import type { AppSettings, PairedDevice } from '@easyshare/shared';
 
 interface SettingsViewProps {
   settings: AppSettings;
   onUpdate: (updates: Partial<AppSettings>) => void;
+  pairedDevices?: PairedDevice[];
+  onUnpair?: (deviceId: string) => void;
 }
 
-export function SettingsView({ settings, onUpdate }: SettingsViewProps) {
+export function SettingsView({ settings, onUpdate, pairedDevices = [], onUnpair }: SettingsViewProps) {
   const [deviceName, setDeviceName] = useState(settings.deviceName);
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -214,11 +219,68 @@ export function SettingsView({ settings, onUpdate }: SettingsViewProps) {
             </div>
           </motion.section>
 
-          {/* About section */}
+          {/* Paired Devices section */}
           <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
+            className="p-6 rounded-2xl bg-neutral-900/60 border border-neutral-800"
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 rounded-lg bg-neutral-800">
+                <IconDevices size={18} className="text-neutral-300" />
+              </div>
+              <h2 className="text-lg font-medium text-white">Paired Devices</h2>
+            </div>
+
+            {pairedDevices.length === 0 ? (
+              <div className="text-center py-8">
+                <IconDeviceMobile size={32} className="text-neutral-700 mx-auto mb-3" />
+                <p className="text-neutral-500 text-sm">No paired devices</p>
+                <p className="text-neutral-600 text-xs mt-1">
+                  Devices you pair with will appear here
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pairedDevices.map((device) => (
+                  <div
+                    key={device.id}
+                    className="flex items-center justify-between p-4 rounded-xl bg-neutral-800/50 border border-neutral-700/50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-neutral-700/50">
+                        {device.platform === 'android' ? (
+                          <IconDeviceMobile size={18} className="text-neutral-400" />
+                        ) : (
+                          <IconDeviceDesktop size={18} className="text-neutral-400" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-white font-medium">{device.name}</p>
+                        <p className="text-neutral-500 text-xs">
+                          Paired {device.pairedAt ? new Date(device.pairedAt).toLocaleDateString() : 'Unknown'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onUnpair?.(device.id)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      <IconTrash size={16} />
+                      <span className="text-sm">Forget</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.section>
+
+          {/* About section */}
+          <motion.section
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
             className="p-6 rounded-2xl bg-neutral-900/40 border border-neutral-800/50"
           >
             <div className="text-center">

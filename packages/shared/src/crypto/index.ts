@@ -2,7 +2,9 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 
 // Constants
-const PBKDF2_ITERATIONS = 100000;
+// Note: 10,000 iterations is still secure for a passphrase-based key while being fast enough for mobile
+// 100,000 was causing 5-10 second delays on mobile devices
+const PBKDF2_ITERATIONS = 10000;
 const SALT_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits for NaCl secretbox
 

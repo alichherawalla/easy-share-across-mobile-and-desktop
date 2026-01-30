@@ -70,6 +70,12 @@ export function useConnection() {
   const pendingFileRequestRef = useRef<FileRequestMessage | null>(null);
   const pendingFileDataRef = useRef<Uint8Array | null>(null);
 
+  // Keepalive state
+  const keepaliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPongReceivedRef = useRef<number>(Date.now());
+  const KEEPALIVE_INTERVAL = 5000; // Send ping every 5 seconds
+  const KEEPALIVE_TIMEOUT = 15000; // Disconnect if no pong for 15 seconds
+
   // Callbacks
   const onPairingSuccessRef = useRef<PairingSuccessCallback | null>(null);
   const onTransferCompleteRef = useRef<TransferCompleteCallback | null>(null);
@@ -90,6 +96,11 @@ export function useConnection() {
     switch (message.type) {
       case 'ping':
         sendMessage(createPongMessage(message.id));
+        break;
+
+      case 'pong':
+        // Update last pong time for keepalive
+        lastPongReceivedRef.current = Date.now();
         break;
 
       case 'pair_request':
@@ -123,8 +134,23 @@ export function useConnection() {
   }, []);
 
   const handlePairingMessageCallback = useCallback((message: Message) => {
-    if (!pairingStateRef.current && localDeviceRef.current) {
-      pairingStateRef.current = createPairingState(localDeviceRef.current);
+    // Create pairing state if needed
+    if (!pairingStateRef.current) {
+      if (localDeviceRef.current) {
+        pairingStateRef.current = createPairingState(localDeviceRef.current);
+      } else {
+        // Create a minimal local device if not set yet
+        const fallbackDevice: DeviceInfo = {
+          id: 'local',
+          name: 'This Device',
+          platform: 'android',
+          version: '1.0.0',
+          host: '',
+          port: 0,
+        };
+        pairingStateRef.current = createPairingState(fallbackDevice);
+        console.log('Warning: localDevice not set, using fallback for pairing');
+      }
     }
 
     if (!pairingStateRef.current) return;
@@ -139,12 +165,43 @@ export function useConnection() {
       const remoteDevice = (message as any).payload?.deviceInfo as DeviceInfo | undefined;
       if (remoteDevice) {
         connectedDeviceRef.current = remoteDevice;
-        setConnectionState({ status: 'pairing', device: remoteDevice });
+        setConnectionState({
+          status: 'pairing',
+          device: remoteDevice,
+          statusMessage: `Pairing request from ${remoteDevice.name}. Enter passphrase to continue.`,
+          pairingStep: 'waiting_for_passphrase',
+        });
         if (onPairingRequestRef.current) {
           onPairingRequestRef.current(remoteDevice);
         }
       }
       return;
+    }
+
+    // Log and update status based on message type
+    console.log(`Processing pairing message: ${message.type}`);
+
+    if (message.type === 'pair_request') {
+      setConnectionState({
+        status: 'pairing',
+        device: connectedDeviceRef.current || undefined,
+        statusMessage: 'Deriving encryption key from passphrase...',
+        pairingStep: 'deriving_key',
+      });
+    } else if (message.type === 'pair_challenge') {
+      setConnectionState({
+        status: 'pairing',
+        device: connectedDeviceRef.current || undefined,
+        statusMessage: 'Received challenge. Computing response...',
+        pairingStep: 'responding_to_challenge',
+      });
+    } else if (message.type === 'pair_response') {
+      setConnectionState({
+        status: 'pairing',
+        device: connectedDeviceRef.current || undefined,
+        statusMessage: 'Verifying passphrase match...',
+        pairingStep: 'verifying_response',
+      });
     }
 
     const { newState, response } = handlePairingMessage(
@@ -156,6 +213,28 @@ export function useConnection() {
     pairingStateRef.current = newState;
 
     if (response) {
+      if (response.type === 'pair_challenge') {
+        setConnectionState({
+          status: 'pairing',
+          device: connectedDeviceRef.current || undefined,
+          statusMessage: 'Sending cryptographic challenge...',
+          pairingStep: 'sending_challenge',
+        });
+      } else if (response.type === 'pair_response') {
+        setConnectionState({
+          status: 'pairing',
+          device: connectedDeviceRef.current || undefined,
+          statusMessage: 'Sending challenge response...',
+          pairingStep: 'responding_to_challenge',
+        });
+      } else if (response.type === 'pair_confirm') {
+        setConnectionState({
+          status: 'pairing',
+          device: connectedDeviceRef.current || undefined,
+          statusMessage: 'Passphrase verified! Confirming pairing...',
+          pairingStep: 'confirming',
+        });
+      }
       sendMessage(response);
     }
 
@@ -164,15 +243,30 @@ export function useConnection() {
       if (pairedDevice && onPairingSuccessRef.current) {
         onPairingSuccessRef.current(pairedDevice);
         connectedDeviceRef.current = newState.remoteDevice!;
-        setConnectionState({ status: 'connected', device: connectedDeviceRef.current });
+        setConnectionState({
+          status: 'connected',
+          device: connectedDeviceRef.current || undefined,
+          statusMessage: 'Pairing successful! Devices are now paired.',
+          pairingStep: 'success',
+        });
       }
     } else if (newState.status === 'failed') {
-      setConnectionState({ status: 'disconnected', error: newState.error });
+      setConnectionState({
+        status: 'disconnected',
+        error: newState.error,
+        statusMessage: `Pairing failed: ${newState.error}`,
+        pairingStep: 'failed',
+      });
     } else if (newState.status === 'waiting') {
       connectedDeviceRef.current = newState.remoteDevice!;
-      setConnectionState({ status: 'pairing', device: connectedDeviceRef.current });
+      setConnectionState({
+        status: 'pairing',
+        device: connectedDeviceRef.current || undefined,
+        statusMessage: 'Waiting for passphrase...',
+        pairingStep: 'waiting_for_passphrase',
+      });
     }
-  }, []);
+  }, [sendMessage]);
 
   const handleTextMessage = useCallback((message: TextMessage) => {
     if (!connectedDeviceRef.current) return;
@@ -289,7 +383,62 @@ export function useConnection() {
     socketRef.current.write(Buffer.from(buffer));
   }, []);
 
+  // Keepalive functions - defined first to avoid circular dependencies
+  const stopKeepaliveRef = useRef<() => void>(() => {});
+  const startKeepaliveRef = useRef<() => void>(() => {});
+  const disconnectRef = useRef<() => void>(() => {});
+
+  const stopKeepalive = useCallback(() => {
+    if (keepaliveIntervalRef.current) {
+      clearInterval(keepaliveIntervalRef.current);
+      keepaliveIntervalRef.current = null;
+    }
+  }, []);
+  stopKeepaliveRef.current = stopKeepalive;
+
+  const disconnect = useCallback(() => {
+    stopKeepaliveRef.current();
+    socketRef.current?.destroy();
+    socketRef.current = null;
+    connectedDeviceRef.current = null;
+    pairingStateRef.current = null;
+    pendingPassphraseRef.current = null;
+    setConnectionState({ status: 'disconnected' });
+  }, []);
+  disconnectRef.current = disconnect;
+
+  const startKeepalive = useCallback(() => {
+    stopKeepaliveRef.current();
+    lastPongReceivedRef.current = Date.now();
+
+    keepaliveIntervalRef.current = setInterval(() => {
+      if (!socketRef.current) {
+        stopKeepaliveRef.current();
+        return;
+      }
+
+      // Check if we've received a pong recently
+      const timeSinceLastPong = Date.now() - lastPongReceivedRef.current;
+      if (timeSinceLastPong > KEEPALIVE_TIMEOUT) {
+        console.log('Keepalive timeout - disconnecting');
+        disconnectRef.current();
+        return;
+      }
+
+      // Send ping
+      sendMessage(createPingMessage());
+    }, KEEPALIVE_INTERVAL);
+  }, [sendMessage]);
+  startKeepaliveRef.current = startKeepalive;
+
   const connect = useCallback(async (device: DeviceInfo): Promise<boolean> => {
+    setConnectionState({
+      status: 'connecting',
+      device,
+      statusMessage: `Opening TCP connection to ${device.name}...`,
+      pairingStep: 'connecting',
+    });
+
     return new Promise((resolve) => {
       const socket = TcpSocket.createConnection(
         {
@@ -299,7 +448,14 @@ export function useConnection() {
         () => {
           socketRef.current = socket;
           connectedDeviceRef.current = device;
-          setConnectionState({ status: 'connected', device });
+          setConnectionState({
+            status: 'connected',
+            device,
+            statusMessage: `Connected to ${device.name}`,
+            pairingStep: 'idle',
+          });
+          // Start keepalive after connection is established
+          startKeepaliveRef.current();
           resolve(true);
         }
       );
@@ -311,25 +467,21 @@ export function useConnection() {
       });
 
       socket.on('close', () => {
-        disconnect();
+        disconnectRef.current();
       });
 
       socket.on('error', (error) => {
         console.error('Socket error:', error);
-        setConnectionState({ status: 'disconnected', error: error.message });
+        setConnectionState({
+          status: 'disconnected',
+          error: error.message,
+          statusMessage: `Connection failed: ${error.message}`,
+          pairingStep: 'failed',
+        });
         resolve(false);
       });
     });
   }, [processMessages]);
-
-  const disconnect = useCallback(() => {
-    socketRef.current?.destroy();
-    socketRef.current = null;
-    connectedDeviceRef.current = null;
-    pairingStateRef.current = null;
-    pendingPassphraseRef.current = null;
-    setConnectionState({ status: 'disconnected' });
-  }, []);
 
   const startPairing = useCallback(
     async (deviceId: string, passphrase: string): Promise<boolean> => {
@@ -342,10 +494,22 @@ export function useConnection() {
       pairingStateRef.current.passphrase = passphrase;
       pairingStateRef.current.remoteDevice = connectedDeviceRef.current!;
 
-      setConnectionState((prev) => ({ ...prev, status: 'pairing' }));
+      setConnectionState({
+        status: 'pairing',
+        device: connectedDeviceRef.current || undefined,
+        statusMessage: 'Sending pairing request...',
+        pairingStep: 'sending_request',
+      });
 
       const request = createPairRequest(localDeviceRef.current);
       sendMessage(request);
+
+      setConnectionState({
+        status: 'pairing',
+        device: connectedDeviceRef.current || undefined,
+        statusMessage: 'Waiting for challenge from remote device...',
+        pairingStep: 'waiting_for_challenge',
+      });
 
       return true;
     },
@@ -535,8 +699,10 @@ export function useConnection() {
   const startServer = useCallback((): Promise<number> => {
     return new Promise((resolve, reject) => {
       if (serverRef.current) {
-        // Server already running
-        resolve(serverPort);
+        // Server already running - get port from the server itself
+        const address = serverRef.current.address();
+        const existingPort = typeof address === 'object' ? address?.port || 0 : 0;
+        resolve(existingPort);
         return;
       }
 
@@ -559,6 +725,9 @@ export function useConnection() {
         connectedDeviceRef.current = remoteDevice;
         setConnectionState({ status: 'connected', device: remoteDevice });
 
+        // Start keepalive when client connects
+        startKeepaliveRef.current();
+
         socket.on('data', (data) => {
           const bytes = typeof data === 'string' ? Buffer.from(data) : data;
           messageBufferRef.current.append(new Uint8Array(bytes));
@@ -567,6 +736,7 @@ export function useConnection() {
 
         socket.on('close', () => {
           console.log('Client disconnected');
+          stopKeepaliveRef.current();
           if (socketRef.current === socket) {
             socketRef.current = null;
             connectedDeviceRef.current = null;
@@ -594,9 +764,10 @@ export function useConnection() {
         resolve(port);
       });
     });
-  }, [processMessages, serverPort]);
+  }, [processMessages]);
 
   const stopServer = useCallback(() => {
+    stopKeepaliveRef.current();
     if (serverRef.current) {
       serverRef.current.close();
       serverRef.current = null;

@@ -22,13 +22,20 @@ export class DiscoveryService implements IDiscoveryService {
   }
 
   async start(): Promise<void> {
+    console.log('Starting discovery for easyshare services...');
     // Start browsing for other EasyShare services
     this.browser = this.bonjour.find({ type: 'easyshare' }, (service: Service) => {
+      console.log('Service callback received:', service.name, service.type);
       this.handleServiceFound(service);
     });
 
     this.browser.on('down', (service: Service) => {
+      console.log('Service down:', service.name);
       this.handleServiceLost(service);
+    });
+
+    this.browser.on('up', (service: Service) => {
+      console.log('Service up event:', service.name, service.addresses, service.port);
     });
   }
 
