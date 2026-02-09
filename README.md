@@ -79,12 +79,28 @@ Most file-sharing solutions require cloud accounts, internet connectivity, or th
 
 ## Features
 
-### Core Functionality
-- **Automatic Device Discovery** — Devices on the same network find each other automatically using mDNS/Bonjour (zero-configuration networking)
-- **Secure Pairing** — Passphrase-based device pairing ensures only authorized devices can communicate
-- **Text Sharing** — Instantly share clipboard content, notes, URLs, or any text between devices
-- **File Transfer** — Send files of any size with progress tracking and integrity verification
-- **Transfer History** — View your recent transfers with timestamps and status
+### Fast Transfers for Any File Size
+- **HTTP-Accelerated Large Files** — Files over 5MB transfer via HTTP streaming, bypassing bridge overhead for native-speed throughput
+- **Handles Massive Files** — Send 400MB, 1GB, or larger files without memory issues thanks to streaming I/O
+- **Small Files Stay Simple** — Files under 5MB use efficient chunk-based transfer over the existing TCP connection
+- **Real-Time Progress** — Per-file progress bars with percentage, speed, and duration tracking
+- **Integrity Verified** — SHA-512 streaming checksums verify every byte without loading files into memory
+
+### Instant Device Discovery
+- **Zero-Configuration Networking** — Devices find each other automatically using mDNS/Bonjour with no manual IP entry
+- **Periodic Re-Scanning** — Automatic discovery refresh every 15 seconds catches devices that join the network late
+- **Works Instantly** — Devices typically appear within 1-2 seconds of launching the app
+
+### Multi-File Transfers with Queue
+- **Batch File Sending** — Select multiple files at once from the file picker or drag and drop on desktop
+- **Visual Transfer Queue** — See every file's status: queued, transferring with progress bar, completed, or failed
+- **Sequential Reliability** — Files transfer one at a time to avoid overwhelming the connection, with the queue showing overall progress
+
+### Secure Pairing & Encryption
+- **Passphrase-Based Pairing** — Simple passphrase entry on both devices establishes a shared secret
+- **Challenge-Response Protocol** — Passphrases are never sent over the network; only cryptographic proofs
+- **End-to-End Encryption** — All data encrypted using NaCl secretbox (XSalsa20-Poly1305)
+- **Remember Paired Devices** — Reconnect instantly to previously paired devices without re-pairing
 
 ### Privacy & Offline-First Design
 - **100% Local Network** — All communication stays on your local network; nothing ever leaves your premises
@@ -92,12 +108,16 @@ Most file-sharing solutions require cloud accounts, internet connectivity, or th
 - **No Cloud Services** — Zero dependency on any external servers or services
 - **No Accounts** — No registration, no email, no personal information collected
 - **No Telemetry** — No analytics, no tracking, no usage data collection
-- **End-to-End Encryption** — All data encrypted using industry-standard cryptography
+
+### Connection Resilience
+- **Auto-Reconnect** — If the connection drops (e.g., Android backgrounding during file selection), the app automatically reconnects when returning to foreground
+- **Keepalive System** — Application-level ping/pong with 2-minute timeout, paused during transfers and when the app is backgrounded
+- **Connection Retry** — Initial connections retry up to 3 times with backoff for reliability on flaky networks
 
 ### User Experience
-- **Modern Dark UI** — Beautiful, minimal interface with smooth animations
-- **Cross-Platform** — Native apps for both Android and macOS
-- **Remember Paired Devices** — Reconnect instantly to previously paired devices
+- **Modern Dark UI** — Beautiful, minimal interface with smooth animations on both platforms
+- **Cross-Platform** — Native apps for both Android and macOS with shared TypeScript core
+- **Transfer History** — View recent transfers with speed, duration, and file details
 - **Auto-Accept Option** — Optionally auto-accept transfers from trusted devices
 - **Configurable Save Location** — Choose where received files are saved
 
@@ -134,8 +154,9 @@ When you pair two devices:
 
 ### File Integrity
 
-- Files are split into 64KB chunks for reliable transmission
-- SHA-512 checksums (truncated to 128 bits) verify file integrity
+- Small files are split into 64KB chunks for reliable transmission
+- Large files stream via HTTP at native speed with progress tracking
+- SHA-512 streaming checksums verify integrity without loading entire files into memory
 - Any corruption is detected and the transfer fails safely
 
 ### Local Storage
@@ -200,7 +221,7 @@ EasyShare uses a monorepo architecture with three packages:
 
 | Component | Technology |
 |-----------|------------|
-| **Shared Core** | TypeScript 5.3, tweetnacl (encryption), tsup |
+| **Shared Core** | TypeScript 5.3, tweetnacl (encryption), js-sha512 (streaming checksums), tsup |
 | **Desktop (macOS)** | Electron 33, React 18, Tailwind CSS, Framer Motion |
 | **Mobile (Android)** | React Native 0.73, NativeWind, react-native-tcp-socket |
 | **Build Tools** | Vite, Metro, electron-builder |
@@ -486,7 +507,8 @@ EasyShare uses the following network resources:
 | Resource | Purpose | Configurable |
 |----------|---------|--------------|
 | mDNS (UDP 5353) | Device discovery | No |
-| TCP (dynamic port) | File transfer | No |
+| TCP (dynamic port) | Control messages, small file transfer | No |
+| HTTP (dynamic port) | Large file transfer (>= 5MB) | No |
 | Service name: `_easyshare._tcp` | mDNS service type | No |
 
 **Firewall requirements:**
@@ -561,6 +583,10 @@ After pairing:
 
 ### File Transfer Protocol
 
+EasyShare uses two transfer modes, chosen automatically based on file size:
+
+**Small files (< 5MB) — Chunk-based over TCP:**
+
 ```
 ┌─────────────┐                              ┌─────────────┐
 │   Sender    │                              │   Receiver  │
@@ -569,26 +595,40 @@ After pairing:
        │  1. FILE_REQUEST (name, size, checksum)    │
        │────────────────────────────────────────────►
        │                                            │
-       │  2. FILE_ACCEPT / FILE_REJECT              │
+       │  2. FILE_ACCEPT                            │
        │◄────────────────────────────────────────────
        │                                            │
-       │  3. FILE_CHUNK (encrypted, 64KB chunks)    │
+       │  3. FILE_CHUNK (64KB chunks)               │
        │────────────────────────────────────────────►
        │         ... repeat for all chunks ...      │
+       │                                            │
+       │  4. FILE_COMPLETE (checksum)               │
+       │────────────────────────────────────────────►
+       ▼                                            ▼
+```
+
+**Large files (>= 5MB) — HTTP streaming:**
+
+```
+┌─────────────┐                              ┌─────────────┐
+│   Sender    │                              │   Receiver  │
+└──────┬──────┘                              └──────┬──────┘
+       │                                            │
+       │  1. FILE_REQUEST (name, size, httpUrl)     │
        │────────────────────────────────────────────►
        │                                            │
-       │     Receiver verifies SHA-512 checksum     │
+       │  2. FILE_ACCEPT (uploadUrl)                │
+       │◄────────────────────────────────────────────
        │                                            │
-       │  4. FILE_COMPLETE (success/failure)        │
+       │  3. HTTP transfer (native speed)           │
+       │────────── file data via HTTP ─────────────►
+       │                                            │
+       │  4. FILE_ACK (success/failure)             │
        │◄────────────────────────────────────────────
        ▼                                            ▼
 ```
 
-Files are transferred in 64KB chunks:
-1. Sender requests file transfer with metadata
-2. Receiver accepts/rejects
-3. Chunks are sent sequentially with progress updates
-4. SHA-512 checksum verifies integrity
+The HTTP path avoids the React Native bridge bottleneck for large files, achieving native transfer speeds. Both paths verify file integrity — small files use full SHA-512 checksums, large files verify by file size to avoid reading the entire file back through the bridge.
 
 ---
 
