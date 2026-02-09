@@ -15,6 +15,7 @@ export class DiscoveryService implements IDiscoveryService {
   private discoveredDevices: Map<string, DiscoveredDevice> = new Map();
   private onDeviceFoundCallback?: (device: DiscoveredDevice) => void;
   private onDeviceLostCallback?: (deviceId: string) => void;
+  private rescanInterval: NodeJS.Timeout | null = null;
 
   constructor(localDevice: DeviceInfo) {
     this.bonjour = new Bonjour();
@@ -23,7 +24,16 @@ export class DiscoveryService implements IDiscoveryService {
 
   async start(): Promise<void> {
     console.log('Starting discovery for easyshare services...');
-    // Start browsing for other EasyShare services
+    this.startBrowser();
+
+    // Periodically restart the browser to catch missed announcements
+    this.rescanInterval = setInterval(() => {
+      console.log('Periodic discovery re-scan...');
+      this.restartBrowser();
+    }, 15000); // Re-scan every 15 seconds
+  }
+
+  private startBrowser(): void {
     this.browser = this.bonjour.find({ type: 'easyshare' }, (service: Service) => {
       console.log('Service callback received:', service.name, service.type);
       this.handleServiceFound(service);
@@ -39,7 +49,21 @@ export class DiscoveryService implements IDiscoveryService {
     });
   }
 
+  private restartBrowser(): void {
+    if (this.browser) {
+      try {
+        this.browser.stop();
+      } catch (_) {}
+      this.browser = null;
+    }
+    this.startBrowser();
+  }
+
   async stop(): Promise<void> {
+    if (this.rescanInterval) {
+      clearInterval(this.rescanInterval);
+      this.rescanInterval = null;
+    }
     if (this.browser) {
       this.browser.stop();
       this.browser = null;

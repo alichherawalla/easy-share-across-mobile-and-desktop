@@ -14,6 +14,8 @@ export function useDiscovery() {
   const zeroconfRef = useRef<Zeroconf | null>(null);
   const localDeviceRef = useRef<DeviceInfo | null>(null);
   const isAdvertisingRef = useRef<boolean>(false);
+  const rescanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const readvertiseIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     zeroconfRef.current = new Zeroconf();
@@ -75,9 +77,27 @@ export function useDiscovery() {
 
   const startDiscovery = useCallback(() => {
     zeroconfRef.current?.scan('easyshare', 'tcp', 'local.');
+
+    // Periodically restart scanning to catch missed announcements
+    if (rescanIntervalRef.current) {
+      clearInterval(rescanIntervalRef.current);
+    }
+    rescanIntervalRef.current = setInterval(() => {
+      console.log('Periodic discovery re-scan...');
+      try {
+        zeroconfRef.current?.stop();
+      } catch (_) {}
+      setTimeout(() => {
+        zeroconfRef.current?.scan('easyshare', 'tcp', 'local.');
+      }, 500);
+    }, 15000); // Re-scan every 15 seconds
   }, []);
 
   const stopDiscovery = useCallback(() => {
+    if (rescanIntervalRef.current) {
+      clearInterval(rescanIntervalRef.current);
+      rescanIntervalRef.current = null;
+    }
     try {
       zeroconfRef.current?.stop();
     } catch (error) {
@@ -96,10 +116,31 @@ export function useDiscovery() {
     } catch (error) {
       console.error('Failed to advertise service:', error);
     }
+
+    // Periodically re-register to keep the advertisement fresh
+    if (readvertiseIntervalRef.current) {
+      clearInterval(readvertiseIntervalRef.current);
+    }
+    readvertiseIntervalRef.current = setInterval(async () => {
+      if (!localDeviceRef.current || !isAdvertisingRef.current) return;
+      console.log('Periodic re-advertisement...');
+      try {
+        await nsdBridge.unregisterService();
+      } catch (_) {}
+      try {
+        await nsdBridge.registerService(localDeviceRef.current);
+      } catch (err) {
+        console.error('Re-advertisement failed:', err);
+      }
+    }, 30000); // Re-advertise every 30 seconds
   }, []);
 
   const stopAdvertising = useCallback(async () => {
     localDeviceRef.current = null;
+    if (readvertiseIntervalRef.current) {
+      clearInterval(readvertiseIntervalRef.current);
+      readvertiseIntervalRef.current = null;
+    }
     // Only try to unregister if we were actually advertising
     if (!isAdvertisingRef.current) {
       return;
