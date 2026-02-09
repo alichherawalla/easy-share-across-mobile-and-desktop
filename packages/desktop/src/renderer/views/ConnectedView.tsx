@@ -14,7 +14,8 @@ import {
   IconCopy,
   IconFolderOpen,
 } from '@tabler/icons-react';
-import type { DeviceInfo, TransferProgress, Transfer } from '@easyshare/shared';
+import type { DeviceInfo, TransferProgress, TransferQueueItem, Transfer, FileTransfer } from '@easyshare/shared';
+import { formatTransferSpeed, formatDuration } from '@easyshare/shared';
 import { ProgressBar } from '../components/ProgressBar';
 import { BorderBeam } from '../components/BorderBeam';
 
@@ -26,6 +27,7 @@ interface ConnectedViewProps {
   onSendFiles?: (filePaths: string[]) => void;
   currentProgress: TransferProgress | null;
   transfers: Transfer[];
+  transferQueue?: TransferQueueItem[];
 }
 
 export function ConnectedView({
@@ -36,6 +38,7 @@ export function ConnectedView({
   onSendFiles,
   currentProgress,
   transfers,
+  transferQueue = [],
 }: ConnectedViewProps) {
   const [textInput, setTextInput] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
@@ -151,8 +154,56 @@ export function ConnectedView({
           </div>
         </motion.div>
 
-        {/* Transfer progress */}
-        {currentProgress && (
+        {/* Transfer progress / queue */}
+        {transferQueue.length > 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 p-4 rounded-xl bg-neutral-900/60 border border-neutral-800 space-y-2"
+          >
+            <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
+              Sending {transferQueue.filter((q) => q.status === 'completed').length}/{transferQueue.length} files
+            </p>
+            {transferQueue.map((item) => (
+              <div key={item.id} className="flex items-center gap-3 py-1.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className={`text-sm truncate ${
+                      item.status === 'pending' ? 'text-neutral-500' :
+                      item.status === 'failed' ? 'text-red-400' : 'text-white'
+                    }`}>
+                      {item.fileName}
+                    </p>
+                    <span className={`text-xs ml-2 flex-shrink-0 ${
+                      item.status === 'completed' ? 'text-green-400' :
+                      item.status === 'failed' ? 'text-red-400' :
+                      item.status === 'transferring' ? 'text-blue-400' :
+                      'text-neutral-600'
+                    }`}>
+                      {item.status === 'completed' ? '✓' :
+                       item.status === 'failed' ? '✗' :
+                       item.status === 'transferring' ? `${item.progress}%` :
+                       'Queued'}
+                    </span>
+                  </div>
+                  {item.status === 'transferring' && (
+                    <div className="h-1 rounded-full bg-neutral-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                        style={{ width: `${item.progress}%` }}
+                      />
+                    </div>
+                  )}
+                  {item.status === 'completed' && (
+                    <div className="h-1 rounded-full bg-green-500/30">
+                      <div className="h-full rounded-full bg-green-500 w-full" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        ) : currentProgress ? (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -163,7 +214,7 @@ export function ConnectedView({
               label={currentProgress.currentFile || 'Transferring...'}
             />
           </motion.div>
-        )}
+        ) : null}
 
         {/* Recent transfers */}
         <motion.div
@@ -218,6 +269,55 @@ export function ConnectedView({
           )}
         </motion.div>
 
+        {/* Send file section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <h3 className="text-sm font-medium text-neutral-500 uppercase tracking-wide mb-4">
+            Send File
+          </h3>
+
+          <div
+            onClick={handleSelectFile}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`
+              w-full p-8 rounded-xl border-2 border-dashed cursor-pointer
+              transition-all duration-200 group
+              ${isDragOver
+                ? 'border-blue-500 bg-blue-500/10'
+                : 'border-neutral-800 hover:border-neutral-700 hover:bg-neutral-900/30'
+              }
+            `}
+          >
+            <div className="flex flex-col items-center gap-3">
+              <div className={`p-3 rounded-full transition-colors ${
+                isDragOver ? 'bg-blue-500/20' : 'bg-neutral-800 group-hover:bg-neutral-700'
+              }`}>
+                <IconUpload
+                  size={24}
+                  className={`transition-colors ${
+                    isDragOver ? 'text-blue-400' : 'text-neutral-500 group-hover:text-neutral-400'
+                  }`}
+                />
+              </div>
+              <div className="text-center">
+                <p className={`transition-colors ${
+                  isDragOver ? 'text-blue-400' : 'text-neutral-400 group-hover:text-neutral-300'
+                }`}>
+                  {isDragOver ? 'Drop files here' : 'Click to select files'}
+                </p>
+                <p className="text-sm text-neutral-600 mt-1">
+                  or drag and drop (multiple files supported)
+                </p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+        
         {/* Send text section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -266,55 +366,6 @@ export function ConnectedView({
               Send Text
             </button>
           </form>
-        </motion.div>
-
-        {/* Send file section */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
-          <h3 className="text-sm font-medium text-neutral-500 uppercase tracking-wide mb-4">
-            Send File
-          </h3>
-
-          <div
-            onClick={handleSelectFile}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            className={`
-              w-full p-8 rounded-xl border-2 border-dashed cursor-pointer
-              transition-all duration-200 group
-              ${isDragOver
-                ? 'border-blue-500 bg-blue-500/10'
-                : 'border-neutral-800 hover:border-neutral-700 hover:bg-neutral-900/30'
-              }
-            `}
-          >
-            <div className="flex flex-col items-center gap-3">
-              <div className={`p-3 rounded-full transition-colors ${
-                isDragOver ? 'bg-blue-500/20' : 'bg-neutral-800 group-hover:bg-neutral-700'
-              }`}>
-                <IconUpload
-                  size={24}
-                  className={`transition-colors ${
-                    isDragOver ? 'text-blue-400' : 'text-neutral-500 group-hover:text-neutral-400'
-                  }`}
-                />
-              </div>
-              <div className="text-center">
-                <p className={`transition-colors ${
-                  isDragOver ? 'text-blue-400' : 'text-neutral-400 group-hover:text-neutral-300'
-                }`}>
-                  {isDragOver ? 'Drop files here' : 'Click to select files'}
-                </p>
-                <p className="text-sm text-neutral-600 mt-1">
-                  or drag and drop (multiple files supported)
-                </p>
-              </div>
-            </div>
-          </div>
         </motion.div>
       </div>
 
@@ -389,6 +440,13 @@ export function ConnectedView({
                       <div className="text-neutral-400 text-sm space-y-2">
                         <p><span className="text-neutral-500">File:</span> {selectedTransfer.fileName}</p>
                         <p><span className="text-neutral-500">Size:</span> {((selectedTransfer.fileSize || 0) / 1024).toFixed(1)} KB</p>
+                        {(selectedTransfer as FileTransfer).speedBytesPerSec != null && (
+                          <p>
+                            <span className="text-neutral-500">Speed:</span> {formatTransferSpeed((selectedTransfer as FileTransfer).speedBytesPerSec!)}
+                            {' · '}
+                            <span className="text-neutral-500">Time:</span> {formatDuration((selectedTransfer as FileTransfer).durationMs!)}
+                          </p>
+                        )}
                         {selectedTransfer.direction === 'receive' && (selectedTransfer as any).filePath && (
                           <p><span className="text-neutral-500">Saved to:</span> <span className="text-neutral-300 break-all">{(selectedTransfer as any).filePath}</span></p>
                         )}

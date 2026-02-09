@@ -5,6 +5,7 @@ import type {
   PairedDevice,
   Transfer,
   TransferProgress,
+  TransferQueueItem,
   ConnectionState,
   AppSettings,
 } from '@easyshare/shared';
@@ -27,6 +28,7 @@ export default function App() {
     status: 'disconnected',
   });
   const [currentProgress, setCurrentProgress] = useState<TransferProgress | null>(null);
+  const [transferQueue, setTransferQueue] = useState<TransferQueueItem[]>([]);
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [pairingDevice, setPairingDevice] = useState<DiscoveredDevice | null>(null);
   const [isIncomingPairing, setIsIncomingPairing] = useState(false);
@@ -86,7 +88,17 @@ export default function App() {
     });
 
     const unsubProgress = window.api.onTransferProgress((progress) => {
+      if (!progress) return;
       setCurrentProgress(progress);
+      // Update active queue item's progress
+      setTransferQueue((prev) => {
+        if (prev.length === 0) return prev;
+        const activeIdx = prev.findIndex((item) => item.status === 'transferring');
+        if (activeIdx < 0) return prev;
+        return prev.map((item, idx) =>
+          idx === activeIdx ? { ...item, progress: progress.percentage } : item
+        );
+      });
     });
 
     const unsubComplete = window.api.onTransferComplete((transfer) => {
@@ -154,10 +166,40 @@ export default function App() {
   }, []);
 
   const handleSendFiles = useCallback(async (filePaths: string[]) => {
-    // Send files sequentially to avoid overwhelming the connection
-    for (const filePath of filePaths) {
-      await window.api.sendFile(filePath);
+    if (filePaths.length <= 1) {
+      // Single file — no queue needed
+      if (filePaths.length === 1) await window.api.sendFile(filePaths[0]);
+      return;
     }
+
+    // Build queue items
+    const queueItems: TransferQueueItem[] = filePaths.map((fp, i) => ({
+      id: `queue-${Date.now()}-${i}`,
+      fileName: fp.split('/').pop() || fp.split('\\').pop() || fp,
+      fileSize: 0,
+      status: 'pending' as const,
+      progress: 0,
+      direction: 'send' as const,
+    }));
+    setTransferQueue(queueItems);
+
+    // Send files sequentially, updating queue status
+    for (let i = 0; i < filePaths.length; i++) {
+      setTransferQueue((prev) =>
+        prev.map((item, idx) =>
+          idx === i ? { ...item, status: 'transferring' } : item
+        )
+      );
+      const success = await window.api.sendFile(filePaths[i]);
+      setTransferQueue((prev) =>
+        prev.map((item, idx) =>
+          idx === i ? { ...item, status: success ? 'completed' : 'failed', progress: success ? 100 : item.progress } : item
+        )
+      );
+    }
+
+    // Clear queue after 3 seconds
+    setTimeout(() => setTransferQueue([]), 3000);
   }, []);
 
   const handleUnpair = useCallback(async (deviceId: string) => {
@@ -225,6 +267,7 @@ export default function App() {
                 onSendFiles={handleSendFiles}
                 currentProgress={currentProgress}
                 transfers={transfers}
+                transferQueue={transferQueue}
               />
             </motion.div>
           )}
