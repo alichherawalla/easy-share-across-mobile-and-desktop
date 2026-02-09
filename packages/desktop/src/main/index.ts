@@ -1,9 +1,22 @@
 import { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } from 'electron';
 import { join } from 'path';
+import * as os from 'os';
 import { DiscoveryService } from './discovery';
 import { ConnectionManager } from './connection';
 import { StorageService } from './storage';
 import type { DeviceInfo, PairedDevice, Transfer } from '@easyshare/shared';
+
+function getLocalIp(): string {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -92,7 +105,8 @@ async function initializeServices(): Promise<void> {
     port: 0,
   });
 
-  connectionManager = new ConnectionManager(storageService);
+  const localIp = getLocalIp();
+  connectionManager = new ConnectionManager(storageService, localIp);
 
   // Helper to safely send to renderer
   const safeSend = (channel: string, data: any) => {
@@ -191,6 +205,8 @@ function setupIpcHandlers(): void {
       properties: ['openFile'],
       title: 'Select a file to send',
     });
+    // Reset keepalive — main process event loop may stall during native dialog
+    connectionManager?.resetKeepaliveTimer();
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
@@ -203,6 +219,8 @@ function setupIpcHandlers(): void {
       properties: ['openFile', 'multiSelections'],
       title: 'Select files to send',
     });
+    // Reset keepalive — main process event loop may stall during native dialog
+    connectionManager?.resetKeepaliveTimer();
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
