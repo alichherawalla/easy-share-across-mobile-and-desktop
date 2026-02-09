@@ -9,7 +9,8 @@ import {
   IconCopy,
   IconFolderOpen,
 } from '@tabler/icons-react';
-import type { Transfer } from '@easyshare/shared';
+import type { Transfer, FileTransfer } from '@easyshare/shared';
+import { formatTransferSpeed, formatDuration } from '@easyshare/shared';
 import { TransferItem } from '../components/TransferItem';
 
 interface HistoryViewProps {
@@ -212,6 +213,13 @@ export function HistoryView({ transfers, onClear }: HistoryViewProps) {
                       <div className="text-neutral-400 text-sm space-y-2">
                         <p><span className="text-neutral-500">File:</span> {selectedTransfer.fileName}</p>
                         <p><span className="text-neutral-500">Size:</span> {((selectedTransfer.fileSize || 0) / 1024).toFixed(1)} KB</p>
+                        {(selectedTransfer as FileTransfer).speedBytesPerSec != null && (
+                          <p>
+                            <span className="text-neutral-500">Speed:</span> {formatTransferSpeed((selectedTransfer as FileTransfer).speedBytesPerSec!)}
+                            {' · '}
+                            <span className="text-neutral-500">Time:</span> {formatDuration((selectedTransfer as FileTransfer).durationMs!)}
+                          </p>
+                        )}
                         {selectedTransfer.direction === 'receive' && (selectedTransfer as any).filePath && (
                           <p><span className="text-neutral-500">Saved to:</span> <span className="text-neutral-300">{(selectedTransfer as any).filePath}</span></p>
                         )}

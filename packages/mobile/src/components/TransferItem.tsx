@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import type { Transfer, TextTransfer, FileTransfer } from '@easyshare/shared';
-import { formatFileSize } from '@easyshare/shared';
+import { formatFileSize, formatTransferSpeed, formatDuration } from '@easyshare/shared';
 
 interface TransferItemProps {
   transfer: Transfer;
@@ -54,6 +54,11 @@ const styles = StyleSheet.create({
   },
   fileSizeText: {
     color: '#737373',
+  },
+  speedText: {
+    fontSize: 12,
+    color: '#525252',
+    marginTop: 2,
   },
   timeContainer: {
     alignItems: 'flex-end',
@@ -115,12 +120,21 @@ export function TransferItem({ transfer, index }: TransferItemProps) {
               {(transfer as TextTransfer).content}
             </Text>
           ) : (
-            <Text style={styles.contentText}>
-              {(transfer as FileTransfer).fileName}
-              <Text style={styles.fileSizeText}>
-                {' '}{formatFileSize((transfer as FileTransfer).fileSize)}
+            <>
+              <Text style={styles.contentText}>
+                {(transfer as FileTransfer).fileName}
+                <Text style={styles.fileSizeText}>
+                  {' '}{formatFileSize((transfer as FileTransfer).fileSize)}
+                </Text>
               </Text>
-            </Text>
+              {(transfer as FileTransfer).speedBytesPerSec != null && (
+                <Text style={styles.speedText}>
+                  {formatTransferSpeed((transfer as FileTransfer).speedBytesPerSec!)}
+                  {' · '}
+                  {formatDuration((transfer as FileTransfer).durationMs!)}
+                </Text>
+              )}
+            </>
           )}
         </View>
 

@@ -6,7 +6,7 @@ import {
   IconArrowDown,
 } from '@tabler/icons-react';
 import type { Transfer, TextTransfer, FileTransfer } from '@easyshare/shared';
-import { formatFileSize } from '@easyshare/shared';
+import { formatFileSize, formatTransferSpeed, formatDuration } from '@easyshare/shared';
 
 interface TransferItemProps {
   transfer: Transfer;
@@ -79,12 +79,21 @@ export function TransferItem({ transfer, index, onClick }: TransferItemProps) {
               {(transfer as TextTransfer).content}
             </p>
           ) : (
-            <p className="text-white text-sm">
-              {(transfer as FileTransfer).fileName}
-              <span className="text-neutral-500 ml-2">
-                {formatFileSize((transfer as FileTransfer).fileSize)}
-              </span>
-            </p>
+            <>
+              <p className="text-white text-sm">
+                {(transfer as FileTransfer).fileName}
+                <span className="text-neutral-500 ml-2">
+                  {formatFileSize((transfer as FileTransfer).fileSize)}
+                </span>
+              </p>
+              {(transfer as FileTransfer).speedBytesPerSec != null && (
+                <p className="text-xs text-neutral-600 mt-0.5">
+                  {formatTransferSpeed((transfer as FileTransfer).speedBytesPerSec!)}
+                  {' · '}
+                  {formatDuration((transfer as FileTransfer).durationMs!)}
+                </p>
+              )}
+            </>
           )}
         </div>
 
