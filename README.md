@@ -1,8 +1,19 @@
 # EasyShare
 
-**Privacy-First Local Network File & Text Sharing Between Android and macOS**
+**Truly Private, Fully Offline File & Text Sharing**
 
-EasyShare is a cross-platform application that enables seamless file and text sharing between Android and macOS devices over your local network. No cloud servers, no accounts, no internet required—just secure, direct device-to-device communication.
+EasyShare is a cross-platform application that enables seamless file and text sharing between your devices over your local network. No cloud servers, no accounts, no internet required — just secure, direct device-to-device communication.
+
+**Not a single packet leaves your device outside your local network.** No analytics. No telemetry. No tracking. No phone-home. The code is open source — verify it yourself.
+
+### Supported Platforms
+
+| Platform | Status |
+|----------|--------|
+| **Android** | Available now |
+| **macOS** | Available now |
+| **iOS** | Coming soon |
+| **Windows** | Coming soon |
 
 ---
 
@@ -102,12 +113,13 @@ Most file-sharing solutions require cloud accounts, internet connectivity, or th
 - **End-to-End Encryption** — All data encrypted using NaCl secretbox (XSalsa20-Poly1305)
 - **Remember Paired Devices** — Reconnect instantly to previously paired devices without re-pairing
 
-### Privacy & Offline-First Design
-- **100% Local Network** — All communication stays on your local network; nothing ever leaves your premises
+### Truly Private & Offline
+- **Zero External Network Traffic** — Not a single packet leaves your local network. No analytics, no crash reporting, no update checks, no DNS lookups to external servers. Nothing.
 - **No Internet Required** — Works in airplane mode, isolated networks, or anywhere without internet
 - **No Cloud Services** — Zero dependency on any external servers or services
 - **No Accounts** — No registration, no email, no personal information collected
-- **No Telemetry** — No analytics, no tracking, no usage data collection
+- **No Telemetry** — No analytics, no tracking, no usage data collection of any kind
+- **Fully Auditable** — Open source code you can inspect to verify every claim on this page
 
 ### Connection Resilience
 - **Auto-Reconnect** — If the connection drops (e.g., Android backgrounding during file selection), the app automatically reconnects when returning to foreground
@@ -125,7 +137,7 @@ Most file-sharing solutions require cloud accounts, internet connectivity, or th
 
 ## Privacy & Security
 
-EasyShare was built with security as a foundational principle, not an afterthought.
+EasyShare was built with security as a foundational principle, not an afterthought. Every network operation is confined to your local network — there are no analytics SDKs, no crash reporters, no auto-updaters, and no external API calls anywhere in the codebase.
 
 ### Encryption
 
@@ -875,7 +887,7 @@ If you discover a security vulnerability:
 
 ### Is my data sent to any servers?
 
-**No.** EasyShare is completely local. Your files and text are transferred directly between your devices over your local network. No data ever leaves your network or touches any external servers.
+**No.** EasyShare is completely local. Your files and text are transferred directly between your devices over your local network. No data ever leaves your network or touches any external servers. There are zero analytics, zero telemetry, and zero external network calls in the entire codebase — not even crash reporting or update checks. You can audit the source code yourself to verify this.
 
 ### Does it work without internet?
 
@@ -898,7 +910,7 @@ The passphrase is used to derive the encryption key. It ensures that only device
 
 ### Can I use this on iOS or Windows?
 
-Currently, EasyShare supports macOS and Android. iOS and Windows versions may be added in the future—contributions are welcome!
+Currently, EasyShare supports **Android** and **macOS**. Support for **iOS** and **Windows** is coming soon — contributions are welcome!
 
 ---
 
@@ -919,6 +931,6 @@ MIT
 ---
 
 <p align="center">
-  <strong>Built with privacy in mind.</strong><br>
-  Your data. Your devices. Your network. Nothing else.
+  <strong>Built with privacy in mind. Verify it yourself.</strong><br>
+  Your data. Your devices. Your network. Not a single packet leaves.
 </p>
