@@ -18,7 +18,8 @@ try {
 } catch (e) {
   // Module not available
 }
-import type { DeviceInfo, TransferProgress, Transfer } from '@easyshare/shared';
+import type { DeviceInfo, TransferProgress, TransferQueueItem, Transfer, FileTransfer } from '@easyshare/shared';
+import { formatTransferSpeed, formatDuration } from '@easyshare/shared';
 import { ProgressBar } from '../components/ProgressBar';
 
 interface ConnectedScreenProps {
@@ -29,6 +30,7 @@ interface ConnectedScreenProps {
   onSendFiles?: (files: Array<{ uri: string; name?: string }>) => void;
   currentProgress: TransferProgress | null;
   transfers: Transfer[];
+  transferQueue?: TransferQueueItem[];
 }
 
 const styles = StyleSheet.create({
@@ -350,6 +352,73 @@ const styles = StyleSheet.create({
     color: '#a3a3a3',
     fontWeight: '500',
   },
+  queueHeader: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#737373',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  queueItem: {
+    paddingVertical: 6,
+  },
+  queueItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  queueFileName: {
+    fontSize: 13,
+    color: '#ffffff',
+    flex: 1,
+    marginRight: 8,
+  },
+  queueFileNamePending: {
+    color: '#737373',
+  },
+  queueFileNameFailed: {
+    color: '#f87171',
+  },
+  queueStatus: {
+    fontSize: 12,
+  },
+  queueStatusCompleted: {
+    color: '#4ade80',
+  },
+  queueStatusFailed: {
+    color: '#f87171',
+  },
+  queueStatusActive: {
+    color: '#60a5fa',
+  },
+  queueStatusPending: {
+    color: '#525252',
+  },
+  queueProgressBg: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: '#262626',
+    overflow: 'hidden',
+  },
+  queueProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: '#3b82f6',
+  },
+  queueProgressCompleteBg: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(34, 197, 94, 0.3)',
+    overflow: 'hidden',
+  },
+  queueProgressCompleteFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: '#22c55e',
+    width: '100%',
+  },
 });
 
 export function ConnectedScreen({
@@ -360,6 +429,7 @@ export function ConnectedScreen({
   onSendFiles,
   currentProgress,
   transfers,
+  transferQueue = [],
 }: ConnectedScreenProps) {
   const [textInput, setTextInput] = useState('');
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
@@ -466,7 +536,56 @@ export function ConnectedScreen({
         </View>
       </Animated.View>
 
-      {currentProgress && (
+      {transferQueue.length > 0 ? (
+        <Animated.View
+          entering={FadeInDown.duration(300)}
+          style={styles.progressCard}
+        >
+          <Text style={styles.queueHeader}>
+            Sending {transferQueue.filter((q) => q.status === 'completed').length}/{transferQueue.length} files
+          </Text>
+          {transferQueue.map((item) => (
+            <View key={item.id} style={styles.queueItem}>
+              <View style={styles.queueItemRow}>
+                <Text
+                  style={[
+                    styles.queueFileName,
+                    item.status === 'pending' && styles.queueFileNamePending,
+                    item.status === 'failed' && styles.queueFileNameFailed,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {item.fileName}
+                </Text>
+                <Text
+                  style={[
+                    styles.queueStatus,
+                    item.status === 'completed' && styles.queueStatusCompleted,
+                    item.status === 'failed' && styles.queueStatusFailed,
+                    item.status === 'transferring' && styles.queueStatusActive,
+                    item.status === 'pending' && styles.queueStatusPending,
+                  ]}
+                >
+                  {item.status === 'completed' ? '✓' :
+                   item.status === 'failed' ? '✗' :
+                   item.status === 'transferring' ? `${item.progress}%` :
+                   'Queued'}
+                </Text>
+              </View>
+              {item.status === 'transferring' && (
+                <View style={styles.queueProgressBg}>
+                  <View style={[styles.queueProgressFill, { width: `${item.progress}%` }]} />
+                </View>
+              )}
+              {item.status === 'completed' && (
+                <View style={styles.queueProgressCompleteBg}>
+                  <View style={styles.queueProgressCompleteFill} />
+                </View>
+              )}
+            </View>
+          ))}
+        </Animated.View>
+      ) : currentProgress ? (
         <Animated.View
           entering={FadeInDown.duration(300)}
           style={styles.progressCard}
@@ -476,7 +595,7 @@ export function ConnectedScreen({
             label={currentProgress.currentFile || 'Transferring...'}
           />
         </Animated.View>
-      )}
+      ) : null}
 
       {/* Recent Activity */}
       <Animated.View
@@ -539,6 +658,22 @@ export function ConnectedScreen({
         )}
       </Animated.View>
 
+  <Animated.View entering={FadeInDown.delay(200).duration(300)}>
+        <Text style={styles.sectionTitle}>Send File</Text>
+
+        <TouchableOpacity onPress={handleSelectFile} style={styles.fileDropZone}>
+          <View style={styles.fileDropContent}>
+            <Text style={styles.fileIcon}>📄</Text>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={styles.fileDropText}>Tap to select files</Text>
+              <Text style={styles.fileDropSubtext}>
+                Select one or multiple files to share
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+
       <Animated.View
         entering={FadeInDown.delay(100).duration(300)}
         style={styles.section}
@@ -579,22 +714,6 @@ export function ConnectedScreen({
             </Text>
           </TouchableOpacity>
         </View>
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(200).duration(300)}>
-        <Text style={styles.sectionTitle}>Send File</Text>
-
-        <TouchableOpacity onPress={handleSelectFile} style={styles.fileDropZone}>
-          <View style={styles.fileDropContent}>
-            <Text style={styles.fileIcon}>📄</Text>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={styles.fileDropText}>Tap to select files</Text>
-              <Text style={styles.fileDropSubtext}>
-                Select one or multiple files to share
-              </Text>
-            </View>
-          </View>
-        </TouchableOpacity>
       </Animated.View>
 
       <View style={styles.bottomPadding} />
@@ -664,6 +783,16 @@ export function ConnectedScreen({
                   <Text style={styles.modalFileValue}>
                     {((selectedTransfer?.fileSize || 0) / 1024).toFixed(1)} KB
                   </Text>
+                  {(selectedTransfer as FileTransfer)?.speedBytesPerSec != null && (
+                    <>
+                      <Text style={[styles.modalFileLabel, { marginTop: 12 }]}>Speed</Text>
+                      <Text style={styles.modalFileValue}>
+                        {formatTransferSpeed((selectedTransfer as FileTransfer).speedBytesPerSec!)}
+                        {' · '}
+                        {formatDuration((selectedTransfer as FileTransfer).durationMs!)}
+                      </Text>
+                    </>
+                  )}
                   {selectedTransfer?.direction === 'receive' && (selectedTransfer as any).filePath && (
                     <>
                       <Text style={[styles.modalFileLabel, { marginTop: 12 }]}>Saved to</Text>

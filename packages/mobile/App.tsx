@@ -17,6 +17,7 @@ import type {
   PairedDevice,
   Transfer,
   TransferProgress,
+  TransferQueueItem,
   ConnectionState,
   AppSettings,
 } from '@easyshare/shared';
@@ -93,6 +94,8 @@ function App(): React.JSX.Element {
     onPairingRequest,
     setLocalDevice,
   } = useConnection();
+
+  const [transferQueue, setTransferQueue] = useState<TransferQueueItem[]>([]);
 
   // Track if we're responding to an incoming pairing request
   const [isIncomingPairing, setIsIncomingPairing] = useState(false);
@@ -175,6 +178,18 @@ function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.deviceId]);
 
+  // Sync transfer progress to active queue item
+  useEffect(() => {
+    if (!currentProgress || transferQueue.length === 0) return;
+    setTransferQueue((prev) => {
+      const activeIdx = prev.findIndex((item) => item.status === 'transferring');
+      if (activeIdx < 0) return prev;
+      return prev.map((item, idx) =>
+        idx === activeIdx ? { ...item, progress: currentProgress.percentage } : item
+      );
+    });
+  }, [currentProgress, transferQueue.length]);
+
   // Handle connection state changes - only switch view on status transitions
   const prevStatusRef = React.useRef(connectionState.status);
   useEffect(() => {
@@ -239,7 +254,7 @@ function App(): React.JSX.Element {
   }, [pairingDevice, isIncomingPairing, connect, startPairing, respondToPairing]);
 
   const handleDisconnect = useCallback(async () => {
-    await disconnect();
+    await disconnect(true);
   }, [disconnect]);
 
   const handleSendText = useCallback(async (text: string) => {
@@ -251,10 +266,38 @@ function App(): React.JSX.Element {
   }, [sendFile]);
 
   const handleSendFiles = useCallback(async (files: Array<{ uri: string; name?: string }>) => {
-    // Send files sequentially to avoid overwhelming the connection
-    for (const file of files) {
-      await sendFile(file.uri, file.name);
+    if (files.length <= 1) {
+      if (files.length === 1) await sendFile(files[0].uri, files[0].name);
+      return;
     }
+
+    // Build queue items
+    const queueItems: TransferQueueItem[] = files.map((f, i) => ({
+      id: `queue-${Date.now()}-${i}`,
+      fileName: f.name || f.uri.split('/').pop() || 'Unknown',
+      fileSize: 0,
+      status: 'pending' as const,
+      progress: 0,
+      direction: 'send' as const,
+    }));
+    setTransferQueue(queueItems);
+
+    for (let i = 0; i < files.length; i++) {
+      setTransferQueue((prev) =>
+        prev.map((item, idx) =>
+          idx === i ? { ...item, status: 'transferring' } : item
+        )
+      );
+      const success = await sendFile(files[i].uri, files[i].name);
+      setTransferQueue((prev) =>
+        prev.map((item, idx) =>
+          idx === i ? { ...item, status: success ? 'completed' : 'failed', progress: success ? 100 : item.progress } : item
+        )
+      );
+    }
+
+    // Clear queue after 3 seconds
+    setTimeout(() => setTransferQueue([]), 3000);
   }, [sendFile]);
 
   const handleUnpair = useCallback(async (deviceId: string) => {
@@ -321,6 +364,7 @@ function App(): React.JSX.Element {
                 onSendFiles={handleSendFiles}
                 currentProgress={currentProgress}
                 transfers={transfers}
+                transferQueue={transferQueue}
               />
             </Animated.View>
           )}
