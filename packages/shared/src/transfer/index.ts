@@ -8,6 +8,7 @@ import type {
   FileRejectMessage,
   FileChunkMessage,
   FileCompleteMessage,
+  FileAckMessage,
   DeviceInfo,
 } from '../types';
 import {
@@ -51,9 +52,10 @@ export function createFileTransfer(
   fileSize: number,
   mimeType: string,
   device: DeviceInfo,
-  direction: 'send' | 'receive'
+  direction: 'send' | 'receive',
+  durationMs?: number
 ): FileTransfer {
-  return {
+  const transfer: FileTransfer = {
     id: generateMessageId(),
     type: 'file',
     timestamp: Date.now(),
@@ -64,6 +66,11 @@ export function createFileTransfer(
     fileSize,
     mimeType,
   };
+  if (durationMs != null && durationMs > 0) {
+    transfer.durationMs = durationMs;
+    transfer.speedBytesPerSec = Math.round((fileSize / durationMs) * 1000);
+  }
+  return transfer;
 }
 
 /**
@@ -130,6 +137,69 @@ export function createFileRequest(
 }
 
 /**
+ * Create a file request message with a pre-computed checksum (for streaming/large files).
+ * Avoids needing the entire file in memory.
+ */
+export function createFileRequestStreaming(
+  fileName: string,
+  fileSize: number,
+  mimeType: string,
+  checksum: string
+): FileRequestMessage {
+  return {
+    type: 'file_request',
+    id: generateMessageId(),
+    timestamp: Date.now(),
+    payload: {
+      fileName,
+      fileSize,
+      mimeType,
+      checksum,
+    },
+  };
+}
+
+/**
+ * Create a file complete message with a pre-computed checksum (for streaming/large files).
+ * Avoids needing the entire file in memory.
+ */
+export function createFileCompleteStreaming(requestId: string, checksum: string): FileCompleteMessage {
+  return {
+    type: 'file_complete',
+    id: generateMessageId(),
+    timestamp: Date.now(),
+    payload: {
+      requestId,
+      checksum,
+    },
+  };
+}
+
+/**
+ * Create a file request message with an HTTP download URL (for large files sent via HTTP).
+ */
+export function createFileRequestHttp(
+  fileName: string,
+  fileSize: number,
+  mimeType: string,
+  checksum: string,
+  httpUrl: string
+): FileRequestMessage {
+  return {
+    type: 'file_request',
+    id: generateMessageId(),
+    timestamp: Date.now(),
+    payload: {
+      fileName,
+      fileSize,
+      mimeType,
+      checksum,
+      httpUrl,
+    },
+  };
+}
+
+/**
  * Create a file accept message
  */
 export function createFileAccept(requestId: string): FileAcceptMessage {
@@ -139,6 +209,36 @@ export function createFileAccept(requestId: string): FileAcceptMessage {
     timestamp: Date.now(),
     payload: {
       requestId,
+    },
+  };
+}
+
+/**
+ * Create a file accept message with an HTTP upload URL (for receiving large files via HTTP).
+ */
+export function createFileAcceptHttp(requestId: string, uploadUrl: string): FileAcceptMessage {
+  return {
+    type: 'file_accept',
+    id: generateMessageId(),
+    timestamp: Date.now(),
+    payload: {
+      requestId,
+      uploadUrl,
+    },
+  };
+}
+
+/**
+ * Create a file ack message (sent after HTTP transfer completes).
+ */
+export function createFileAck(requestId: string, success: boolean): FileAckMessage {
+  return {
+    type: 'file_ack',
+    id: generateMessageId(),
+    timestamp: Date.now(),
+    payload: {
+      requestId,
+      success,
     },
   };
 }
@@ -176,6 +276,29 @@ export function createFileChunk(
       chunkIndex,
       totalChunks,
       data: encodeBase64(data),
+    },
+  };
+}
+
+/**
+ * Create a file chunk message from already-base64-encoded data.
+ * Avoids the decode → re-encode roundtrip when data is read as base64 from disk.
+ */
+export function createFileChunkFromBase64(
+  requestId: string,
+  chunkIndex: number,
+  totalChunks: number,
+  base64Data: string
+): FileChunkMessage {
+  return {
+    type: 'file_chunk',
+    id: generateMessageId(),
+    timestamp: Date.now(),
+    payload: {
+      requestId,
+      chunkIndex,
+      totalChunks,
+      data: base64Data,
     },
   };
 }
@@ -256,11 +379,12 @@ export function calculateProgress(
   totalBytes: number,
   currentFile?: string
 ): TransferProgress {
+  const clampedBytes = Math.min(bytesTransferred, totalBytes);
   return {
     transferId,
-    bytesTransferred,
+    bytesTransferred: clampedBytes,
     totalBytes,
-    percentage: totalBytes > 0 ? Math.round((bytesTransferred / totalBytes) * 100) : 0,
+    percentage: totalBytes > 0 ? Math.min(100, Math.round((clampedBytes / totalBytes) * 100)) : 0,
     currentFile,
   };
 }
@@ -280,6 +404,28 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/**
+ * Format transfer speed for display
+ */
+export function formatTransferSpeed(bytesPerSec: number): string {
+  if (bytesPerSec < 1024) return `${bytesPerSec} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  if (bytesPerSec < 1024 * 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(1)} GB/s`;
+}
+
+/**
+ * Format transfer duration for display
+ */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds.toFixed(0)}s`;
 }
 
 /**

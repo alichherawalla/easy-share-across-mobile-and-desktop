@@ -1,5 +1,6 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
+import { sha512 } from 'js-sha512';
 
 // Constants
 // Note: 10,000 iterations is still secure for a passphrase-based key while being fast enough for mobile
@@ -173,6 +174,36 @@ export function calculateChecksum(data: Uint8Array): string {
 export function verifyChecksum(data: Uint8Array, checksum: string): boolean {
   const calculated = calculateChecksum(data);
   return calculated === checksum;
+}
+
+/**
+ * Incremental/streaming checksum calculator using SHA-512.
+ * Produces the same output format as calculateChecksum() (base64 of first 16 bytes of SHA-512)
+ * but allows feeding data in chunks to avoid loading entire files into memory.
+ */
+export class IncrementalChecksum {
+  private hasher: ReturnType<typeof sha512.create>;
+
+  constructor() {
+    this.hasher = sha512.create();
+  }
+
+  /**
+   * Feed a chunk of data into the hash
+   */
+  update(data: Uint8Array): void {
+    this.hasher.update(data);
+  }
+
+  /**
+   * Finalize and return checksum in the same format as calculateChecksum()
+   * (base64 of first 16 bytes of SHA-512 digest)
+   */
+  digest(): string {
+    const hashArray = this.hasher.array();
+    const first16 = new Uint8Array(hashArray.slice(0, 16));
+    return encodeBase64(first16);
+  }
 }
 
 // Re-export utilities

@@ -54,6 +54,8 @@ export interface FileTransfer extends TransferMetadata {
   fileSize: number;
   mimeType: string;
   filePath?: string; // Local path after receiving
+  durationMs?: number; // Transfer duration in milliseconds
+  speedBytesPerSec?: number; // Transfer speed in bytes per second
 }
 
 export interface FilesTransfer extends TransferMetadata {
@@ -77,6 +79,15 @@ export interface TransferProgress {
   currentFile?: string;
 }
 
+export interface TransferQueueItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  status: 'pending' | 'transferring' | 'completed' | 'failed';
+  progress: number;
+  direction: 'send' | 'receive';
+}
+
 // Message Protocol Types
 export type MessageType =
   | 'ping'
@@ -92,6 +103,7 @@ export type MessageType =
   | 'file_reject'
   | 'file_chunk'
   | 'file_complete'
+  | 'file_ack'
   | 'error';
 
 export interface Message {
@@ -154,6 +166,7 @@ export interface FileRequestMessage extends Message {
     fileSize: number;
     mimeType: string;
     checksum: string;
+    httpUrl?: string;
   };
 }
 
@@ -161,6 +174,7 @@ export interface FileAcceptMessage extends Message {
   type: 'file_accept';
   payload: {
     requestId: string;
+    uploadUrl?: string;
   };
 }
 
@@ -187,6 +201,14 @@ export interface FileCompleteMessage extends Message {
   payload: {
     requestId: string;
     checksum: string;
+  };
+}
+
+export interface FileAckMessage extends Message {
+  type: 'file_ack';
+  payload: {
+    requestId: string;
+    success: boolean;
   };
 }
 

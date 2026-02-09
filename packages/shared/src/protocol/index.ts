@@ -23,6 +23,7 @@ export const MESSAGE_TYPE_CODES: Record<string, number> = {
   file_reject: 0x32,
   file_chunk: 0x33,
   file_complete: 0x34,
+  file_ack: 0x35,
   error: 0xff,
 };
 
