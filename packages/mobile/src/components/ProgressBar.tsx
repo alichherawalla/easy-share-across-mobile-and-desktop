@@ -8,6 +8,7 @@ import Animated, {
 interface ProgressBarProps {
   progress: number;
   label?: string;
+  info?: string;
 }
 
 const styles = StyleSheet.create({
@@ -38,9 +39,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 999,
   },
+  infoText: {
+    color: '#737373',
+    fontSize: 12,
+  },
 });
 
-export function ProgressBar({ progress, label }: ProgressBarProps) {
+export function ProgressBar({ progress, label, info }: ProgressBarProps) {
   const animatedStyle = useAnimatedStyle(() => {
     return {
       width: withTiming(`${progress}%`, { duration: 300 }),
@@ -58,6 +63,7 @@ export function ProgressBar({ progress, label }: ProgressBarProps) {
       <View style={styles.track}>
         <Animated.View style={[styles.fill, animatedStyle]} />
       </View>
+      {info ? <Text style={styles.infoText}>{info}</Text> : null}
     </View>
   );
 }

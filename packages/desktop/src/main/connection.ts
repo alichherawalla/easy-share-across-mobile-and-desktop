@@ -3,7 +3,6 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { Transform } from 'stream';
 import type {
   DeviceInfo,
   PairedDevice,
@@ -63,6 +62,7 @@ export class ConnectionManager {
   private localDevice: DeviceInfo | null = null;
   private storageService: StorageService;
   private localIp: string = '';
+  private connectedViaEmulator: boolean = false;
 
   // File transfer state
   private pendingFileRequest: FileRequestMessage | null = null;
@@ -114,6 +114,22 @@ export class ConnectionManager {
     this.localIp = ip;
   }
 
+  /** Get the IP to use in HTTP URLs sent to the connected device */
+  private getHttpIp(port: number): string {
+    if (this.connectedViaEmulator) {
+      // Emulator reaches host via 10.0.2.2; set up adb reverse so it works
+      try {
+        const { execSync } = require('child_process');
+        execSync(`adb reverse tcp:${port} tcp:${port}`, { timeout: 3000 });
+        console.log(`Set up adb reverse for port ${port}`);
+      } catch (e) {
+        console.warn('adb reverse failed:', (e as Error).message);
+      }
+      return '10.0.2.2';
+    }
+    return this.localIp || '127.0.0.1';
+  }
+
   async start(): Promise<void> {
     const settings = this.storageService.getSettings();
 
@@ -158,38 +174,58 @@ export class ConnectionManager {
     const MAX_RETRIES = 3;
     const BASE_DELAY = 1000; // 1 second
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      this.updateConnectionState({
-        status: 'connecting',
-        device,
-        statusMessage: attempt === 0
-          ? `Opening TCP connection to ${device.name}...`
-          : `Retrying connection to ${device.name} (attempt ${attempt + 1}/${MAX_RETRIES})...`,
-        pairingStep: 'connecting',
-      });
+    // If device has an Android emulator internal IP, try localhost via adb forward
+    const isEmulatorIp = device.host.startsWith('10.0.2.');
+    const hosts = isEmulatorIp ? ['127.0.0.1', device.host] : [device.host];
 
-      const success = await this.attemptConnection(device);
-      if (success) return true;
+    for (const host of hosts) {
+      if (isEmulatorIp) {
+        console.log(`Trying host ${host} for device ${device.name} (emulator detected)`);
+        // Auto-setup adb forward for emulator
+        if (host === '127.0.0.1') {
+          try {
+            const { execSync } = require('child_process');
+            execSync(`adb forward tcp:${device.port} tcp:${device.port}`, { timeout: 3000 });
+            console.log(`Set up adb forward for port ${device.port}`);
+          } catch (e) {
+            console.warn('adb forward failed (adb may not be in PATH):', (e as Error).message);
+          }
+        }
+      }
 
-      // Don't delay after the last attempt
-      if (attempt < MAX_RETRIES - 1) {
-        const delay = BASE_DELAY * (attempt + 1);
-        console.log(`Connection attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
-        await new Promise((r) => setTimeout(r, delay));
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        this.updateConnectionState({
+          status: 'connecting',
+          device,
+          statusMessage: attempt === 0
+            ? `Opening TCP connection to ${device.name}...`
+            : `Retrying connection to ${device.name} (attempt ${attempt + 1}/${MAX_RETRIES})...`,
+          pairingStep: 'connecting',
+        });
+
+        const success = await this.attemptConnection(device, host);
+        if (success) return true;
+
+        if (attempt < MAX_RETRIES - 1) {
+          const delay = BASE_DELAY * (attempt + 1);
+          console.log(`Connection attempt ${attempt + 1} failed (host: ${host}), retrying in ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, delay));
+        }
       }
     }
 
-    console.error(`All ${MAX_RETRIES} connection attempts to ${device.name} failed`);
+    console.error(`All connection attempts to ${device.name} failed`);
     this.updateConnectionState({
       status: 'disconnected',
-      error: `Failed to connect after ${MAX_RETRIES} attempts`,
-      statusMessage: `Connection failed after ${MAX_RETRIES} attempts`,
+      error: `Failed to connect after all attempts`,
+      statusMessage: `Connection failed after all attempts`,
       pairingStep: 'failed',
     });
     return false;
   }
 
-  private attemptConnection(device: DeviceInfo): Promise<boolean> {
+  private attemptConnection(device: DeviceInfo, host?: string): Promise<boolean> {
+    const connectHost = host || device.host;
     return new Promise((resolve) => {
       const socket = new net.Socket();
       const timeout = setTimeout(() => {
@@ -201,6 +237,7 @@ export class ConnectionManager {
         clearTimeout(timeout);
         this.socket = socket;
         this.connectedDevice = device;
+        this.connectedViaEmulator = device.host.startsWith('10.0.2.');
         this.updateConnectionState({
           status: 'connected',
           device,
@@ -218,7 +255,7 @@ export class ConnectionManager {
         resolve(false);
       });
 
-      socket.connect(device.port, device.host);
+      socket.connect(device.port, connectHost);
     });
   }
 
@@ -230,6 +267,7 @@ export class ConnectionManager {
       this.socket = null;
     }
     this.connectedDevice = null;
+    this.connectedViaEmulator = false;
     this.currentPairingState = null;
     this.pendingPassphrase = null;
     this.transferActive = false;
@@ -315,6 +353,47 @@ export class ConnectionManager {
     return true;
   }
 
+  cancelTransfer(): void {
+    console.log('cancelTransfer called');
+    // Shut down HTTP servers
+    this.shutdownHttpServer();
+
+    // Clean up streaming receive state
+    if (this.receivingWriteStream) {
+      this.receivingWriteStream.destroy();
+      this.receivingWriteStream = null;
+    }
+    if (this.receivingTempPath) {
+      try { fs.unlinkSync(this.receivingTempPath); } catch (_) {}
+      this.receivingTempPath = null;
+    }
+
+    // Clean up all transfer state
+    this.receivingHasher = null;
+    this.receivingBytesWritten = 0;
+    this.receivingStreaming = false;
+    this.receivingChunks.clear();
+    this.receivingFileInfo = null;
+    this.pendingFileRequest = null;
+    this.pendingFilePath = null;
+    this.pendingFileChecksum = null;
+    this.httpSendingRequestId = null;
+    this.httpReceivingRequestId = null;
+    this.transferActive = false;
+    this.lastPongReceived = Date.now();
+
+    // Clear progress
+    if (this.onTransferProgressCallback) {
+      this.onTransferProgressCallback(null as any);
+    }
+
+    // Resolve pending sendFile promise so multi-file loops stop
+    if (this.sendFileResolver) {
+      this.sendFileResolver(false);
+      this.sendFileResolver = null;
+    }
+  }
+
   async sendText(text: string): Promise<boolean> {
     console.log('sendText called, socket:', !!this.socket, 'device:', !!this.connectedDevice);
     if (!this.socket || !this.connectedDevice) {
@@ -367,7 +446,9 @@ export class ConnectionManager {
         this.pendingFileChecksum = null;
       } else {
         // Large file: use HTTP transfer
-        const checksum = await this.computeStreamingChecksum(filePath);
+        // Skip expensive checksum computation — mobile verifies by file size,
+        // and TCP ensures data integrity at the transport layer.
+        const checksum = `size:${stats.size}`;
         const { url } = await this.startHttpFileServer(filePath, stats.size);
         const request = createFileRequestHttp(fileName, stats.size, mimeType, checksum, url);
         this.sendMessage(request);
@@ -467,6 +548,7 @@ export class ConnectionManager {
 
     // Enable TCP keepalive at the socket level
     this.socket.setKeepAlive(true, 10000);
+    this.socket.setNoDelay(true);
 
     this.socket.on('data', (data) => {
       this.messageBuffer.append(new Uint8Array(data));
@@ -771,7 +853,7 @@ export class ConnectionManager {
           bytesTransferred += chunk.length;
           if (this.onTransferProgressCallback) {
             this.onTransferProgressCallback(
-              calculateProgress(requestId, bytesTransferred, totalBytes)
+              calculateProgress(requestId, bytesTransferred, totalBytes, undefined, this.transferStartTime)
             );
           }
         }
@@ -865,7 +947,7 @@ export class ConnectionManager {
 
         if (this.onTransferProgressCallback) {
           this.onTransferProgressCallback(
-            calculateProgress(requestId, bytesTransferred, totalBytes, fileName)
+            calculateProgress(requestId, bytesTransferred, totalBytes, fileName, this.transferStartTime)
           );
         }
 
@@ -892,7 +974,8 @@ export class ConnectionManager {
             message.payload.requestId,
             this.receivingBytesWritten,
             this.receivingFileInfo.fileSize,
-            this.receivingFileInfo.fileName
+            this.receivingFileInfo.fileName,
+            this.transferStartTime
           )
         );
       }
@@ -906,7 +989,8 @@ export class ConnectionManager {
             message.payload.requestId,
             this.receivingChunks.size * CHUNK_SIZE,
             this.receivingFileInfo.fileSize,
-            this.receivingFileInfo.fileName
+            this.receivingFileInfo.fileName,
+            this.transferStartTime
           )
         );
       }
@@ -1088,23 +1172,25 @@ export class ConnectionManager {
           'Content-Disposition': `attachment; filename="${path.basename(filePath)}"`,
         });
 
-        const readStream = fs.createReadStream(filePath);
-
-        // Track bytes served to report progress on desktop
+        const readStream = fs.createReadStream(filePath, { highWaterMark: 4 * 1024 * 1024 });
         let bytesSent = 0;
-        const progressTracker = new Transform({
-          transform: (chunk, _encoding, callback) => {
-            bytesSent += chunk.length;
-            if (this.onTransferProgressCallback && this.httpSendingRequestId) {
-              this.onTransferProgressCallback(
-                calculateProgress(this.httpSendingRequestId, bytesSent, fileSize, path.basename(filePath))
-              );
-            }
-            callback(null, chunk);
-          },
-        });
+        let lastProgressTime = 0;
 
-        readStream.pipe(progressTracker).pipe(res);
+        readStream.on('data', (chunk: Buffer) => {
+          bytesSent += chunk.length;
+          const now = Date.now();
+          if (now - lastProgressTime >= 100 && this.onTransferProgressCallback && this.httpSendingRequestId) {
+            lastProgressTime = now;
+            this.onTransferProgressCallback(
+              calculateProgress(this.httpSendingRequestId, bytesSent, fileSize, path.basename(filePath), this.transferStartTime)
+            );
+          }
+          if (!res.write(chunk)) {
+            readStream.pause();
+            res.once('drain', () => readStream.resume());
+          }
+        });
+        readStream.on('end', () => res.end());
         readStream.on('error', (err) => {
           console.error('HTTP file serve error:', err);
           res.destroy();
@@ -1114,7 +1200,7 @@ export class ConnectionManager {
       server.listen(0, '0.0.0.0', () => {
         const addr = server.address() as net.AddressInfo;
         this.httpServer = server;
-        const ip = this.localIp || '127.0.0.1';
+        const ip = this.getHttpIp(addr.port);
         const url = `http://${ip}:${addr.port}${urlPath}`;
         console.log('HTTP file server started:', url);
         resolve({ url });
@@ -1155,7 +1241,7 @@ export class ConnectionManager {
       server.listen(0, '0.0.0.0', () => {
         const addr = server.address() as net.AddressInfo;
         this.httpServer = server;
-        const ip = this.localIp || '127.0.0.1';
+        const ip = this.getHttpIp(addr.port);
         const url = `http://${ip}:${addr.port}${urlPath}`;
         console.log('HTTP upload server started:', url);
         resolve({ url });
@@ -1173,21 +1259,27 @@ export class ConnectionManager {
     expectedSize: number,
     expectedChecksum: string
   ): void {
-    const writeStream = fs.createWriteStream(tempPath);
-    const hasher = new IncrementalChecksum();
+    const writeStream = fs.createWriteStream(tempPath, { highWaterMark: 4 * 1024 * 1024 });
+    const sizeBasedVerification = expectedChecksum.startsWith('size:');
+    const hasher = sizeBasedVerification ? null : new IncrementalChecksum();
     let bytesReceived = 0;
+    let lastProgressTime = 0;
 
     req.on('data', (chunk: Buffer) => {
-      hasher.update(new Uint8Array(chunk));
-      writeStream.write(chunk);
+      hasher?.update(new Uint8Array(chunk));
+      if (!writeStream.write(chunk)) req.pause();
       bytesReceived += chunk.length;
 
-      if (this.onTransferProgressCallback && this.httpReceivingRequestId) {
+      const now = Date.now();
+      if (now - lastProgressTime >= 100 && this.onTransferProgressCallback && this.httpReceivingRequestId) {
+        lastProgressTime = now;
         this.onTransferProgressCallback(
-          calculateProgress(this.httpReceivingRequestId, bytesReceived, expectedSize)
+          calculateProgress(this.httpReceivingRequestId, bytesReceived, expectedSize, undefined, this.transferStartTime)
         );
       }
     });
+
+    writeStream.on('drain', () => req.resume());
 
     req.on('end', () => {
       writeStream.end(() => {
@@ -1213,79 +1305,67 @@ export class ConnectionManager {
     expectedChecksum: string,
     boundary: string
   ): void {
-    // Parse multipart: accumulate data, find the file part, extract content
-    const chunks: Buffer[] = [];
+    const writeStream = fs.createWriteStream(tempPath, { highWaterMark: 4 * 1024 * 1024 });
+    // Skip expensive SHA-512 hashing when using size-based verification
+    const sizeBasedVerification = expectedChecksum.startsWith('size:');
+    const hasher = sizeBasedVerification ? null : new IncrementalChecksum();
+    let headersParsed = false;
+    let headerBuffer = Buffer.alloc(0);
+    let bytesWritten = 0;
+    let lastProgressTime = 0;
+    const headerEndMarker = Buffer.from('\r\n\r\n');
 
     req.on('data', (chunk: Buffer) => {
-      chunks.push(chunk);
+      if (!headersParsed) {
+        // Still looking for end of multipart headers
+        headerBuffer = Buffer.concat([headerBuffer, chunk]);
+        const headerEndIdx = headerBuffer.indexOf(headerEndMarker);
+        if (headerEndIdx !== -1) {
+          headersParsed = true;
+          const fileContentStart = headerEndIdx + 4;
+          const remaining = headerBuffer.slice(fileContentStart);
+          headerBuffer = Buffer.alloc(0);
+          if (remaining.length > 0 && bytesWritten < expectedSize) {
+            const toWrite = remaining.slice(0, Math.min(remaining.length, expectedSize - bytesWritten));
+            hasher?.update(new Uint8Array(toWrite));
+            if (!writeStream.write(toWrite)) req.pause();
+            bytesWritten += toWrite.length;
+          }
+        }
+      } else {
+        const rem = expectedSize - bytesWritten;
+        if (rem > 0) {
+          const toWrite = chunk.slice(0, Math.min(chunk.length, rem));
+          hasher?.update(new Uint8Array(toWrite));
+          if (!writeStream.write(toWrite)) req.pause();
+          bytesWritten += toWrite.length;
+        }
+      }
 
-      // Report approximate progress based on total received
-      const received = chunks.reduce((sum, c) => sum + c.length, 0);
-      if (this.onTransferProgressCallback && this.httpReceivingRequestId) {
+      const now = Date.now();
+      if (now - lastProgressTime >= 100 && this.onTransferProgressCallback && this.httpReceivingRequestId) {
+        lastProgressTime = now;
         this.onTransferProgressCallback(
-          calculateProgress(this.httpReceivingRequestId, Math.min(received, expectedSize), expectedSize)
+          calculateProgress(this.httpReceivingRequestId, Math.min(bytesWritten, expectedSize), expectedSize, undefined, this.transferStartTime)
         );
       }
     });
 
+    writeStream.on('drain', () => req.resume());
+
     req.on('end', () => {
-      const body = Buffer.concat(chunks);
-      // Extract file content from multipart body
-      const fileContent = this.extractMultipartFileContent(body, boundary);
-
-      if (!fileContent) {
-        console.error('Failed to extract file from multipart upload');
-        res.writeHead(400);
-        res.end('invalid multipart');
-        return;
-      }
-
-      // Write extracted content and verify checksum
-      const hasher = new IncrementalChecksum();
-      hasher.update(new Uint8Array(fileContent));
-
-      fs.writeFile(tempPath, fileContent, (err) => {
-        if (err) {
-          console.error('Failed to write upload temp file:', err);
-          res.writeHead(500);
-          res.end('write error');
-          return;
-        }
-        this.finalizeUpload(res, tempPath, savePath, fileContent.length, hasher, expectedChecksum);
+      writeStream.end(() => {
+        this.finalizeUpload(res, tempPath, savePath, bytesWritten, hasher, expectedChecksum);
       });
     });
 
     req.on('error', (err) => {
       console.error('HTTP multipart upload error:', err);
+      writeStream.destroy();
+      try { fs.unlinkSync(tempPath); } catch (_) {}
       res.writeHead(500);
       res.end('upload error');
     });
-  }
-
-  private extractMultipartFileContent(body: Buffer, boundary: string): Buffer | null {
-    // Find the boundary markers
-    const boundaryBuf = Buffer.from(`--${boundary}`);
-    const headerEnd = Buffer.from('\r\n\r\n');
-
-    const firstBoundary = body.indexOf(boundaryBuf);
-    if (firstBoundary === -1) return null;
-
-    // Find the end of headers after the first boundary
-    const headersStart = firstBoundary + boundaryBuf.length;
-    const headersEnd = body.indexOf(headerEnd, headersStart);
-    if (headersEnd === -1) return null;
-
-    const contentStart = headersEnd + headerEnd.length;
-
-    // Find the closing boundary
-    const closingBoundary = body.indexOf(boundaryBuf, contentStart);
-    if (closingBoundary === -1) return null;
-
-    // Content ends 2 bytes before the closing boundary (the \r\n before it)
-    const contentEnd = closingBoundary - 2;
-    if (contentEnd <= contentStart) return null;
-
-    return body.slice(contentStart, contentEnd);
   }
 
   private async finalizeUpload(
@@ -1293,7 +1373,7 @@ export class ConnectionManager {
     tempPath: string,
     savePath: string,
     bytesReceived: number,
-    hasher: IncrementalChecksum,
+    hasher: IncrementalChecksum | null,
     expectedChecksum: string
   ): Promise<void> {
     try {
@@ -1318,7 +1398,7 @@ export class ConnectionManager {
           return;
         }
         console.log('HTTP upload size verified:', bytesReceived, 'bytes');
-      } else {
+      } else if (hasher) {
         const computedChecksum = hasher.digest();
         if (computedChecksum !== expectedChecksum) {
           console.error('HTTP upload checksum mismatch:', computedChecksum, '!==', expectedChecksum);

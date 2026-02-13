@@ -19,7 +19,7 @@ try {
   // Module not available
 }
 import type { DeviceInfo, TransferProgress, TransferQueueItem, Transfer, FileTransfer } from '@easyshare/shared';
-import { formatTransferSpeed, formatDuration } from '@easyshare/shared';
+import { formatTransferSpeed, formatDuration, formatProgressInfo } from '@easyshare/shared';
 import { ProgressBar } from '../components/ProgressBar';
 
 interface ConnectedScreenProps {
@@ -28,6 +28,7 @@ interface ConnectedScreenProps {
   onSendText: (text: string) => void;
   onSendFile: (filePath: string, fileName?: string) => void;
   onSendFiles?: (files: Array<{ uri: string; name?: string }>) => void;
+  onCancelTransfer?: () => void;
   currentProgress: TransferProgress | null;
   transfers: Transfer[];
   transferQueue?: TransferQueueItem[];
@@ -358,7 +359,6 @@ const styles = StyleSheet.create({
     color: '#737373',
     textTransform: 'uppercase',
     letterSpacing: 1,
-    marginBottom: 8,
   },
   queueItem: {
     paddingVertical: 6,
@@ -419,6 +419,37 @@ const styles = StyleSheet.create({
     backgroundColor: '#22c55e',
     width: '100%',
   },
+  queueTransferInfo: {
+    fontSize: 11,
+    color: '#737373',
+    marginTop: 3,
+  },
+  queueHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  cancelText: {
+    fontSize: 12,
+    color: '#737373',
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  progressContent: {
+    flex: 1,
+  },
+  cancelButton: {
+    padding: 4,
+    marginTop: 2,
+  },
+  cancelIcon: {
+    fontSize: 14,
+    color: '#737373',
+  },
 });
 
 export function ConnectedScreen({
@@ -427,6 +458,7 @@ export function ConnectedScreen({
   onSendText,
   onSendFile,
   onSendFiles,
+  onCancelTransfer,
   currentProgress,
   transfers,
   transferQueue = [],
@@ -541,9 +573,16 @@ export function ConnectedScreen({
           entering={FadeInDown.duration(300)}
           style={styles.progressCard}
         >
-          <Text style={styles.queueHeader}>
-            Sending {transferQueue.filter((q) => q.status === 'completed').length}/{transferQueue.length} files
-          </Text>
+          <View style={styles.queueHeaderRow}>
+            <Text style={styles.queueHeader}>
+              Sending {transferQueue.filter((q) => q.status === 'completed').length}/{transferQueue.length} files
+            </Text>
+            {onCancelTransfer && (
+              <TouchableOpacity onPress={onCancelTransfer}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           {transferQueue.map((item) => (
             <View key={item.id} style={styles.queueItem}>
               <View style={styles.queueItemRow}>
@@ -573,9 +612,14 @@ export function ConnectedScreen({
                 </Text>
               </View>
               {item.status === 'transferring' && (
-                <View style={styles.queueProgressBg}>
-                  <View style={[styles.queueProgressFill, { width: `${item.progress}%` }]} />
-                </View>
+                <>
+                  <View style={styles.queueProgressBg}>
+                    <View style={[styles.queueProgressFill, { width: `${item.progress}%` }]} />
+                  </View>
+                  {currentProgress && formatProgressInfo(currentProgress) ? (
+                    <Text style={styles.queueTransferInfo}>{formatProgressInfo(currentProgress)}</Text>
+                  ) : null}
+                </>
               )}
               {item.status === 'completed' && (
                 <View style={styles.queueProgressCompleteBg}>
@@ -590,10 +634,20 @@ export function ConnectedScreen({
           entering={FadeInDown.duration(300)}
           style={styles.progressCard}
         >
-          <ProgressBar
-            progress={currentProgress.percentage}
-            label={currentProgress.currentFile || 'Transferring...'}
-          />
+          <View style={styles.progressRow}>
+            <View style={styles.progressContent}>
+              <ProgressBar
+                progress={currentProgress.percentage}
+                label={currentProgress.currentFile || 'Transferring...'}
+                info={formatProgressInfo(currentProgress)}
+              />
+            </View>
+            {onCancelTransfer && (
+              <TouchableOpacity onPress={onCancelTransfer} style={styles.cancelButton}>
+                <Text style={styles.cancelIcon}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </Animated.View>
       ) : null}
 
@@ -658,7 +712,7 @@ export function ConnectedScreen({
         )}
       </Animated.View>
 
-  <Animated.View entering={FadeInDown.delay(200).duration(300)}>
+      <Animated.View entering={FadeInDown.delay(200).duration(300)} style={styles.section}>
         <Text style={styles.sectionTitle}>Send File</Text>
 
         <TouchableOpacity onPress={handleSelectFile} style={styles.fileDropZone}>

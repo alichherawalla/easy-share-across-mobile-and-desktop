@@ -86,6 +86,7 @@ function App(): React.JSX.Element {
     respondToPairing,
     sendText,
     sendFile,
+    cancelTransfer,
     startServer,
     stopServer,
     onPairingSuccess,
@@ -265,6 +266,11 @@ function App(): React.JSX.Element {
     await sendFile(filePath, fileName);
   }, [sendFile]);
 
+  const handleCancelTransfer = useCallback(() => {
+    cancelTransfer();
+    setTransferQueue([]);
+  }, [cancelTransfer]);
+
   const handleSendFiles = useCallback(async (files: Array<{ uri: string; name?: string }>) => {
     if (files.length <= 1) {
       if (files.length === 1) await sendFile(files[0].uri, files[0].name);
@@ -362,6 +368,7 @@ function App(): React.JSX.Element {
                 onSendText={handleSendText}
                 onSendFile={handleSendFile}
                 onSendFiles={handleSendFiles}
+                onCancelTransfer={handleCancelTransfer}
                 currentProgress={currentProgress}
                 transfers={transfers}
                 transferQueue={transferQueue}

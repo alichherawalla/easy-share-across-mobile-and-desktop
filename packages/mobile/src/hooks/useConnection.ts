@@ -94,12 +94,15 @@ export function useConnection() {
 
   // HTTP transfer state
   const httpSendingRequestIdRef = useRef<string | null>(null);
+  const activeDownloadJobIdRef = useRef<number | null>(null);
+  const activeXhrRef = useRef<XMLHttpRequest | null>(null);
 
   // Promise resolver for sendFile — resolved when transfer completes
   const sendFileResolverRef = useRef<((success: boolean) => void) | null>(null);
 
   // Transfer timing
   const transferStartTimeRef = useRef<number>(0);
+  const lastChunkProgressTimeRef = useRef<number>(0);
 
   // Keepalive state
   const keepaliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -358,13 +361,15 @@ export function useConnection() {
           toFile: tempPath,
           progress: (res) => {
             setCurrentProgress(
-              calculateProgress(message.id, res.bytesWritten, fileSize, message.payload.fileName)
+              calculateProgress(message.id, res.bytesWritten, fileSize, message.payload.fileName, transferStartTimeRef.current)
             );
           },
           progressInterval: 100,
         });
+        activeDownloadJobIdRef.current = result.jobId;
 
         const downloadResult = await result.promise;
+        activeDownloadJobIdRef.current = null;
         console.log('HTTP download complete, status:', downloadResult.statusCode, 'bytes:', downloadResult.bytesWritten);
 
         if (downloadResult.statusCode !== 200) {
@@ -395,7 +400,7 @@ export function useConnection() {
 
         // Show 100% before completing
         setCurrentProgress(
-          calculateProgress(message.id, fileSize, fileSize, message.payload.fileName)
+          calculateProgress(message.id, fileSize, fileSize, message.payload.fileName, transferStartTimeRef.current)
         );
 
         // Move to final path
@@ -496,14 +501,19 @@ export function useConnection() {
       }
 
       if (receivingFileInfoRef.current) {
-        setCurrentProgress(
-          calculateProgress(
-            message.payload.requestId,
-            message.payload.chunkIndex * 64 * 1024,
-            receivingFileInfoRef.current.fileSize,
-            receivingFileInfoRef.current.fileName
-          )
-        );
+        const now = Date.now();
+        if (now - lastChunkProgressTimeRef.current >= 100) {
+          lastChunkProgressTimeRef.current = now;
+          setCurrentProgress(
+            calculateProgress(
+              message.payload.requestId,
+              message.payload.chunkIndex * 64 * 1024,
+              receivingFileInfoRef.current.fileSize,
+              receivingFileInfoRef.current.fileName,
+              transferStartTimeRef.current
+            )
+          );
+        }
       }
     } else {
       // In-memory mode for small files
@@ -511,14 +521,19 @@ export function useConnection() {
       receivingChunksRef.current.set(message.payload.chunkIndex, chunkData);
 
       if (receivingFileInfoRef.current) {
-        setCurrentProgress(
-          calculateProgress(
-            message.payload.requestId,
-            receivingChunksRef.current.size * 64 * 1024,
-            receivingFileInfoRef.current.fileSize,
-            receivingFileInfoRef.current.fileName
-          )
-        );
+        const now = Date.now();
+        if (now - lastChunkProgressTimeRef.current >= 100) {
+          lastChunkProgressTimeRef.current = now;
+          setCurrentProgress(
+            calculateProgress(
+              message.payload.requestId,
+              receivingChunksRef.current.size * 64 * 1024,
+              receivingFileInfoRef.current.fileSize,
+              receivingFileInfoRef.current.fileName,
+              transferStartTimeRef.current
+            )
+          );
+        }
       }
     }
   }, []);
@@ -875,16 +890,22 @@ export function useConnection() {
 
         const status = await new Promise<number>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
+          activeXhrRef.current = xhr;
+          let lastUploadProgressTime = 0;
           xhr.upload.addEventListener('progress', (e: any) => {
             if (e.lengthComputable) {
-              setCurrentProgress(
-                calculateProgress(requestId, e.loaded, totalSize, fileName)
-              );
+              const now = Date.now();
+              if (now - lastUploadProgressTime >= 100 || e.loaded === e.total) {
+                lastUploadProgressTime = now;
+                setCurrentProgress(
+                  calculateProgress(requestId, e.loaded, totalSize, fileName, transferStartTimeRef.current)
+                );
+              }
             }
           });
-          xhr.addEventListener('load', () => resolve(xhr.status));
-          xhr.addEventListener('error', () => reject(new Error(`XHR upload error: ${xhr.status}`)));
-          xhr.addEventListener('abort', () => reject(new Error('XHR upload aborted')));
+          xhr.addEventListener('load', () => { activeXhrRef.current = null; resolve(xhr.status); });
+          xhr.addEventListener('error', () => { activeXhrRef.current = null; reject(new Error(`XHR upload error: ${xhr.status}`)); });
+          xhr.addEventListener('abort', () => { activeXhrRef.current = null; reject(new Error('XHR upload aborted')); });
 
           xhr.open('POST', uploadUrl);
 
@@ -943,7 +964,7 @@ export function useConnection() {
 
         const bytesTransferred = Math.min(chunksSent * 64 * 1024, totalSize);
         setCurrentProgress(
-          calculateProgress(requestId, bytesTransferred, totalSize, fileName)
+          calculateProgress(requestId, bytesTransferred, totalSize, fileName, transferStartTimeRef.current)
         );
 
         if (chunksSent % 10 === 0) {
@@ -1015,7 +1036,7 @@ export function useConnection() {
 
           currentPosition += actualReadSize;
           setCurrentProgress(
-            calculateProgress(requestId, currentPosition, totalSize, fileName)
+            calculateProgress(requestId, currentPosition, totalSize, fileName, transferStartTimeRef.current)
           );
 
           await new Promise(resolve => setTimeout(resolve, 5));
@@ -1172,7 +1193,7 @@ export function useConnection() {
           pendingFileDataRef.current = fileData;
           sendMessage(request);
           console.log('sendFile: File request sent (stat-fallback), waiting for accept');
-          setCurrentProgress(calculateProgress(request.id, 0, fileData.length, fileName));
+          setCurrentProgress(calculateProgress(request.id, 0, fileData.length, fileName, transferStartTimeRef.current));
           return await transferComplete;
         } catch (readErr) {
           console.error('sendFile: Failed to read file for size detection:', readErr);
@@ -1195,7 +1216,7 @@ export function useConnection() {
 
         sendMessage(request);
         console.log('sendFile: File request sent (small file), waiting for accept');
-        setCurrentProgress(calculateProgress(request.id, 0, fileData.length, fileName));
+        setCurrentProgress(calculateProgress(request.id, 0, fileData.length, fileName, transferStartTimeRef.current));
 
         return await transferComplete;
       }
@@ -1217,7 +1238,7 @@ export function useConnection() {
 
       sendMessage(request);
       console.log('sendFile: File request sent (HTTP mode), waiting for accept');
-      setCurrentProgress(calculateProgress(request.id, 0, fileSize, fileName));
+      setCurrentProgress(calculateProgress(request.id, 0, fileSize, fileName, transferStartTimeRef.current));
 
       return await transferComplete;
     } catch (err) {
@@ -1256,6 +1277,50 @@ export function useConnection() {
       handlePairingMessageCallback(message);
     }
   }, [handlePairingMessageCallback]);
+
+  const cancelTransfer = useCallback(() => {
+    console.log('cancelTransfer called');
+    // Abort active HTTP download
+    if (activeDownloadJobIdRef.current != null) {
+      RNFS.stopDownload(activeDownloadJobIdRef.current);
+      activeDownloadJobIdRef.current = null;
+    }
+    // Abort active XHR upload
+    if (activeXhrRef.current) {
+      activeXhrRef.current.abort();
+      activeXhrRef.current = null;
+    }
+    // Clean up streaming receive temp file
+    if (receivingTempPathRef.current) {
+      RNFS.unlink(receivingTempPathRef.current).catch(() => {});
+      receivingTempPathRef.current = null;
+    }
+    // Clean up all transfer state
+    receivingHasherRef.current = null;
+    receivingBytesWrittenRef.current = 0;
+    receivingStreamingRef.current = false;
+    receivingChunksRef.current.clear();
+    receivingFileInfoRef.current = null;
+    pendingFileRequestRef.current = null;
+    pendingFileDataRef.current = null;
+    pendingFileUriRef.current = null;
+    pendingFileSizeRef.current = 0;
+    pendingFileChecksumRef.current = null;
+    httpSendingRequestIdRef.current = null;
+    writeBufferPartsRef.current = [];
+    writeBufferBytesRef.current = 0;
+    transferActiveRef.current = false;
+    lastPongReceivedRef.current = Date.now();
+
+    // Clear progress
+    setCurrentProgress(null);
+
+    // Resolve pending sendFile promise so multi-file loops stop
+    if (sendFileResolverRef.current) {
+      sendFileResolverRef.current(false);
+      sendFileResolverRef.current = null;
+    }
+  }, []);
 
   const setLocalDevice = useCallback((device: DeviceInfo) => {
     localDeviceRef.current = device;
@@ -1384,6 +1449,7 @@ export function useConnection() {
     respondToPairing,
     sendText,
     sendFile,
+    cancelTransfer,
     startServer,
     stopServer,
     onPairingSuccess,

@@ -199,6 +199,11 @@ function setupIpcHandlers(): void {
     return connectionManager?.sendFile(filePath);
   });
 
+  // Cancel current transfer
+  ipcMain.handle('transfer:cancel', async () => {
+    connectionManager?.cancelTransfer();
+  });
+
   // Select file dialog (single file)
   ipcMain.handle('dialog:selectFile', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
