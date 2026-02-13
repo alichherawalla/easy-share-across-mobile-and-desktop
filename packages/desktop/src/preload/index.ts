@@ -45,6 +45,8 @@ const api = {
   sendFile: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('transfer:sendFile', filePath),
 
+  cancelTransfer: (): Promise<void> => ipcRenderer.invoke('transfer:cancel'),
+
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:selectFile'),
 
   selectFiles: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:selectFiles'),

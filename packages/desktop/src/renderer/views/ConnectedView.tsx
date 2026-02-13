@@ -15,7 +15,7 @@ import {
   IconFolderOpen,
 } from '@tabler/icons-react';
 import type { DeviceInfo, TransferProgress, TransferQueueItem, Transfer, FileTransfer } from '@easyshare/shared';
-import { formatTransferSpeed, formatDuration } from '@easyshare/shared';
+import { formatTransferSpeed, formatDuration, formatProgressInfo } from '@easyshare/shared';
 import { ProgressBar } from '../components/ProgressBar';
 import { BorderBeam } from '../components/BorderBeam';
 
@@ -25,6 +25,7 @@ interface ConnectedViewProps {
   onSendText: (text: string) => void;
   onSendFile: (filePath: string) => void;
   onSendFiles?: (filePaths: string[]) => void;
+  onCancelTransfer?: () => void;
   currentProgress: TransferProgress | null;
   transfers: Transfer[];
   transferQueue?: TransferQueueItem[];
@@ -36,6 +37,7 @@ export function ConnectedView({
   onSendText,
   onSendFile,
   onSendFiles,
+  onCancelTransfer,
   currentProgress,
   transfers,
   transferQueue = [],
@@ -161,9 +163,19 @@ export function ConnectedView({
             animate={{ opacity: 1, y: 0 }}
             className="mb-8 p-4 rounded-xl bg-neutral-900/60 border border-neutral-800 space-y-2"
           >
-            <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-2">
-              Sending {transferQueue.filter((q) => q.status === 'completed').length}/{transferQueue.length} files
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide">
+                Sending {transferQueue.filter((q) => q.status === 'completed').length}/{transferQueue.length} files
+              </p>
+              {onCancelTransfer && (
+                <button
+                  onClick={onCancelTransfer}
+                  className="text-xs text-neutral-500 hover:text-red-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
             {transferQueue.map((item) => (
               <div key={item.id} className="flex items-center gap-3 py-1.5">
                 <div className="flex-1 min-w-0">
@@ -187,12 +199,17 @@ export function ConnectedView({
                     </span>
                   </div>
                   {item.status === 'transferring' && (
-                    <div className="h-1 rounded-full bg-neutral-800 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                        style={{ width: `${item.progress}%` }}
-                      />
-                    </div>
+                    <>
+                      <div className="h-1 rounded-full bg-neutral-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                          style={{ width: `${item.progress}%` }}
+                        />
+                      </div>
+                      {currentProgress && (
+                        <p className="text-xs text-neutral-500 mt-1">{formatProgressInfo(currentProgress)}</p>
+                      )}
+                    </>
                   )}
                   {item.status === 'completed' && (
                     <div className="h-1 rounded-full bg-green-500/30">
@@ -209,10 +226,24 @@ export function ConnectedView({
             animate={{ opacity: 1, y: 0 }}
             className="mb-8 p-4 rounded-xl bg-neutral-900/60 border border-neutral-800"
           >
-            <ProgressBar
-              progress={currentProgress.percentage}
-              label={currentProgress.currentFile || 'Transferring...'}
-            />
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <ProgressBar
+                  progress={currentProgress.percentage}
+                  label={currentProgress.currentFile || 'Transferring...'}
+                  info={formatProgressInfo(currentProgress)}
+                />
+              </div>
+              {onCancelTransfer && (
+                <button
+                  onClick={onCancelTransfer}
+                  className="mt-0.5 p-1 text-neutral-500 hover:text-red-400 transition-colors flex-shrink-0"
+                  title="Cancel transfer"
+                >
+                  <IconX size={16} />
+                </button>
+              )}
+            </div>
           </motion.div>
         ) : null}
 
@@ -274,6 +305,7 @@ export function ConnectedView({
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
+          className="mb-8"
         >
           <h3 className="text-sm font-medium text-neutral-500 uppercase tracking-wide mb-4">
             Send File

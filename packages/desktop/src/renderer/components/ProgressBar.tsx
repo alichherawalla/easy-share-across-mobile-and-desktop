@@ -3,9 +3,10 @@ import { motion } from 'framer-motion';
 interface ProgressBarProps {
   progress: number;
   label?: string;
+  info?: string;
 }
 
-export function ProgressBar({ progress, label }: ProgressBarProps) {
+export function ProgressBar({ progress, label, info }: ProgressBarProps) {
   return (
     <div className="space-y-2">
       {label && (
@@ -22,6 +23,9 @@ export function ProgressBar({ progress, label }: ProgressBarProps) {
           transition={{ duration: 0.3, ease: 'easeOut' }}
         />
       </div>
+      {info && (
+        <p className="text-xs text-neutral-500">{info}</p>
+      )}
     </div>
   );
 }

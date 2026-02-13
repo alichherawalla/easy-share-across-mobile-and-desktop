@@ -165,6 +165,12 @@ export default function App() {
     await window.api.sendFile(filePath);
   }, []);
 
+  const handleCancelTransfer = useCallback(async () => {
+    await window.api.cancelTransfer();
+    setCurrentProgress(null);
+    setTransferQueue([]);
+  }, []);
+
   const handleSendFiles = useCallback(async (filePaths: string[]) => {
     if (filePaths.length <= 1) {
       // Single file — no queue needed
@@ -265,6 +271,7 @@ export default function App() {
                 onSendText={handleSendText}
                 onSendFile={handleSendFile}
                 onSendFiles={handleSendFiles}
+                onCancelTransfer={handleCancelTransfer}
                 currentProgress={currentProgress}
                 transfers={transfers}
                 transferQueue={transferQueue}

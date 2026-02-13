@@ -77,6 +77,9 @@ export interface TransferProgress {
   totalBytes: number;
   percentage: number;
   currentFile?: string;
+  speedBytesPerSec?: number;
+  etaSeconds?: number;
+  elapsedMs?: number;
 }
 
 export interface TransferQueueItem {

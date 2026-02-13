@@ -371,22 +371,37 @@ export function reassembleChunks(
 }
 
 /**
- * Calculate transfer progress
+ * Calculate transfer progress with optional speed/ETA computation
  */
 export function calculateProgress(
   transferId: string,
   bytesTransferred: number,
   totalBytes: number,
-  currentFile?: string
+  currentFile?: string,
+  startTime?: number
 ): TransferProgress {
   const clampedBytes = Math.min(bytesTransferred, totalBytes);
-  return {
+  const result: TransferProgress = {
     transferId,
     bytesTransferred: clampedBytes,
     totalBytes,
     percentage: totalBytes > 0 ? Math.min(100, Math.round((clampedBytes / totalBytes) * 100)) : 0,
     currentFile,
   };
+
+  if (startTime && startTime > 0) {
+    const elapsedMs = Date.now() - startTime;
+    result.elapsedMs = elapsedMs;
+    if (elapsedMs > 500 && clampedBytes > 0) {
+      result.speedBytesPerSec = Math.round((clampedBytes / elapsedMs) * 1000);
+      if (result.speedBytesPerSec > 0 && clampedBytes < totalBytes) {
+        const remainingBytes = totalBytes - clampedBytes;
+        result.etaSeconds = Math.round(remainingBytes / result.speedBytesPerSec);
+      }
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -426,6 +441,36 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes}m ${remainingSeconds.toFixed(0)}s`;
+}
+
+/**
+ * Format ETA for display
+ */
+export function formatEta(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+/**
+ * Format live transfer progress info string (speed · elapsed · ETA)
+ */
+export function formatProgressInfo(progress: TransferProgress): string {
+  const parts: string[] = [];
+  if (progress.speedBytesPerSec != null && progress.speedBytesPerSec > 0) {
+    parts.push(formatTransferSpeed(progress.speedBytesPerSec));
+  }
+  if (progress.elapsedMs != null && progress.elapsedMs >= 1000) {
+    parts.push(formatDuration(progress.elapsedMs) + ' elapsed');
+  }
+  if (progress.etaSeconds != null && progress.etaSeconds > 0) {
+    parts.push('~' + formatEta(progress.etaSeconds) + ' left');
+  }
+  return parts.join(' · ');
 }
 
 /**
